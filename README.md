@@ -15,7 +15,6 @@ Spaceflight Simulator 的实时多人联机项目。
 - `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
-- `SECURITY.md`：本项目的 [SECURITY](SECURITY.md)。
 
 客户端模组安装在 SFS 的 `Mods` 目录中，服务端作为独立程序运行。客户端与服务端需要使用相互匹配的版本。
 
