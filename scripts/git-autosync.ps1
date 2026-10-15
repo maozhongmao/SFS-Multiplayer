@@ -40,7 +40,7 @@ try {
     $push = git push origin $Branch 2>&1
     # record the push output verbatim (locale independent): it contains the object counts,
     # e.g. "Total 3 (delta 1), reused 0" -- proof that only new objects travel.
-    $tail = ($push | Where-Object { $_ -match '\S' } | Select-Object -Last 2) -join ' | '
+    $tail = ($push | Where-Object { $_ -match '\S' } | Select-Object -Last 4) -join ' | '
     if ($LASTEXITCODE -eq 0) {
         Write-Log ('PUSH ok [' + $tail + ']')
         exit 0
@@ -57,10 +57,10 @@ try {
     }
     $push2 = git push origin $Branch 2>&1
     if ($LASTEXITCODE -eq 0) {
-        $tail2 = ($push2 | Where-Object { $_ -match '\S' } | Select-Object -Last 2) -join ' | '
+        $tail2 = ($push2 | Where-Object { $_ -match '\S' } | Select-Object -Last 4) -join ' | '
         Write-Log ('PUSH ok (after rebase) [' + $tail2 + ']')
     } else {
-        Write-Log ('PUSH FAILED ' + (($push2 | Select-Object -Last 2) -join ' | '))
+        Write-Log ('PUSH FAILED ' + (($push2 | Select-Object -Last 4) -join ' | '))
     }
 } catch {
     Write-Log ('ERROR ' + $_.Exception.Message)
