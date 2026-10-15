@@ -70,3 +70,5 @@ Unregister-ScheduledTask -TaskName 'SFS-Multiplayer-git-autosync' -Confirm:$fals
 确认 `D（删除）` 列里没有别人原有的文件；有就先 `git checkout origin/main -- <文件>` 恢复，
 再提交。本仓库历史上因为整树覆盖误删过 `README.md` / `Plugin/README.md` /
 `Server/server.example.yml` / `LICENSE.md`（都已恢复）。
+
+推送只传远端缺失的对象；无变化时脚本在联网前就退出。
