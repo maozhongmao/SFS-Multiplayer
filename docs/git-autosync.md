@@ -45,3 +45,28 @@ Unregister-ScheduledTask -TaskName 'SFS-Multiplayer-git-autosync' -Confirm:$fals
 
 - 这是**预发布分支**：内容可与正式发布不一致，正式发布仍走 `build-release.ps1` + Releases。
 - 自动提交的 message 形如 `auto: 2026-10-15 20:21:19 (3 files)`，便于回溯。
+
+## 什么该进这个仓库（血的教训）
+
+**基准 = `main` 分支的布局**：`Client/`、`Server/`、`Plugin/`、`README.md`、`LICENSE.md`、`.gitignore`。
+
+`beta` 在此基础上只多这四项，且都是真·新内容：
+
+| 多出的 | 为什么该在 |
+|---|---|
+| `ServerCpp/` | C++ 服务端源码（服务端本体）|
+| `build-release.ps1` | 发布构建脚本 |
+| `docs/` | 我们的文档（插件系统 / 作弊 / 版本计划 / 本文件）|
+| `scripts/` | 本自动同步脚本 |
+
+**不该进的**（已在 `.gitignore` 里，别再放进去）：
+工作目录与工具状态（`.ackcheck/`、`.hermes/`、`.smoke-kcp/`、`tools/`）、
+部署脚本（`deploy/`）、临时测试（`smoketest/`）、维基副本（`wiki/`）、
+归档/反编译资料（`Client/analysis-v1/`、`Client/verdix-archive/`、`Client/docs/`）、
+根目录的 `CHANGELOG.md` 与 `RELEASE-NOTES-*.md`（**贴到 GitHub Release 正文里**，不进仓库）、
+构建产物、游戏参考程序集、存档、同行 GPL 项目、`*.zip`。
+
+**改动别人的文件要克制**：推送前先 `git diff --name-status origin/main origin/beta`，
+确认 `D（删除）` 列里没有别人原有的文件；有就先 `git checkout origin/main -- <文件>` 恢复，
+再提交。本仓库历史上因为整树覆盖误删过 `README.md` / `Plugin/README.md` /
+`Server/server.example.yml` / `LICENSE.md`（都已恢复）。
