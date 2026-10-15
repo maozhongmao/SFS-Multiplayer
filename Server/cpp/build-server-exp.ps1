@@ -6,7 +6,7 @@
 #   profile, into its own directory, so an experiment can never overwrite a
 #   published artifact.
 #
-# Usage: powershell -ExecutionPolicy Bypass -File ServerCpp\build-server-exp.ps1
+# Usage: powershell -ExecutionPolicy Bypass -File Server\cpp\build-server-exp.ps1
 #
 # The board runs the musl static flavor (ELF ET_EXEC, no ld-linux-armhf interp),
 # so the EXP profile must use the same target to stay a drop-in replacement.
@@ -17,8 +17,8 @@
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $zig = Join-Path $root "tools\zig-x86_64-windows-0.16.0\zig.exe"
-$src = Join-Path $root "ServerCpp\src"
-$outDir = Join-Path $root "ServerCpp\build\exp-armv7"
+$src = Join-Path $root "Server\cpp\src"
+$outDir = Join-Path $root "Server\cpp\build\exp-armv7"
 $out = Join-Path $outDir "SFS-Multiplayer-Server-linux-armv7-exp"
 
 if (-not (Test-Path $zig)) { throw "zig not found: $zig" }

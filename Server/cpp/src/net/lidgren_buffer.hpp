@@ -4,7 +4,7 @@
 
 // Lidgren NetBuffer 位级兼容读写器（纯 C++17，无外部依赖）。
 //
-// 唯一权威依据：ServerCpp/golden/ 下由真实 Lidgren.Network 2012.1.7.0 导出的黄金向量。
+// 唯一权威依据：Server/cpp/golden/ 下由真实 Lidgren.Network 2012.1.7.0 导出的黄金向量。
 // 所有位序、字节序、变长整数与字符串格式均来自实测，不做任何推测。
 //
 // 已实测确认的线格式：

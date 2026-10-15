@@ -15,9 +15,10 @@
 param([Parameter(Mandatory=$true)][string]$Version)
 
 $ErrorActionPreference = "Stop"
-$root   = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repo   = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path   # 仓库根（脚本在 Server/cpp/ 下）
+$root   = $repo
 $zig    = Join-Path $root "tools\zig-x86_64-windows-0.16.0\zig.exe"
-$src    = Join-Path $root "ServerCpp\src"
+$src    = Join-Path $root "Server\cpp\src"
 $proj   = Join-Path $root "Client\src\MultiplayerSFS.Client\MultiplayerSFS.Client.csproj"
 $relDir = Join-Path $root ("Client\release-V" + $Version)
 $stage  = Join-Path $root ("artifacts\release-V" + $Version)

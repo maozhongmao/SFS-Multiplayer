@@ -4,7 +4,7 @@
 
 // 黄金向量一致性测试。
 //
-// 读取 ServerCpp/golden/ 下由真实 Lidgren.Network 2012.1.7.0 导出的向量，
+// 读取 Server/cpp/golden/ 下由真实 Lidgren.Network 2012.1.7.0 导出的向量，
 // 用 C++ 的 NetWriter/NetReader 复现，逐位、逐字节比对。
 // 任何不一致都必须让本测试以非零退出码结束；绝不允许"接近正确"。
 #include "../src/net/lidgren_buffer.hpp"

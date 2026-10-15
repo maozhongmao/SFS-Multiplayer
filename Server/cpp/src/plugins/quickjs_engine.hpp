@@ -8,7 +8,7 @@
 // 也不下载依赖，二进制里不会多出任何 QuickJS 符号。
 //
 // 真正接入时:
-//   1. 取 quickjs-ng 源码放进 ServerCpp/src/third_party/quickjs（离线放入，不在构建里下载）。
+//   1. 取 quickjs-ng 源码放进 Server/cpp/src/third_party/quickjs（离线放入，不在构建里下载）。
 //   2. 交叉编译到 armv7 musl（命令行要点见 docs/plugin-system.md 第 6 节）。
 //   3. 把下面 TODO 处补全，并在服务端启动处安装 QuickJsEngineFactory。
 //

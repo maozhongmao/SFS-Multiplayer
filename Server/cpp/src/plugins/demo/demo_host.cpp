@@ -114,7 +114,7 @@ bool read_file(const char* path, std::string* out) {
 std::string resolve_plugin_path(int argc, char** argv) {
     if (argc > 1) return std::string(argv[1]);
     const char* candidates[] = {
-        "ServerCpp/src/plugins/demo/example_plugin.js",
+        "Server/cpp/src/plugins/demo/example_plugin.js",
         "src/plugins/demo/example_plugin.js",
         "../src/plugins/demo/example_plugin.js",
         "example_plugin.js",
@@ -123,7 +123,7 @@ std::string resolve_plugin_path(int argc, char** argv) {
         std::string probe;
         if (read_file(c, &probe)) return std::string(c);
     }
-    return std::string("ServerCpp/src/plugins/demo/example_plugin.js");
+    return std::string("Server/cpp/src/plugins/demo/example_plugin.js");
 }
 
 }  // namespace

@@ -96,7 +96,7 @@ proxy_protocol: true
 ### 接口草案
 
 ```csharp
-// ServerCpp/src/server/command.hpp
+// Server/cpp/src/server/command.hpp
 namespace sfs::server {
 
 struct CommandContext {

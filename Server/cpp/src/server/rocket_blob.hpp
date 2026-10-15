@@ -16,7 +16,7 @@ namespace sfs::server {
 //
 // 为什么只压 parts 而不动整枚火箭：
 //   实测单部件碎片约 3.4 KB/枚，其中 95% 以上是部件里的字符串与容器
-//   （name + number_variables/text_variables 的 key/value，见 ServerCpp/RAM-COMPRESSION.md）；
+//   （name + number_variables/text_variables 的 key/value，见 Server/cpp/RAM-COMPRESSION.md）；
 //   而 location / rotation / throttle / rcs 这些标量是热数据 —— 每帧的权威刷新都在读它们，
 //   必须留在展开形态。只压 parts 就能省掉绝大部分内存，且不必引入 LRU 或改动协议。
 //

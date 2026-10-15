@@ -115,8 +115,8 @@ C++ 侧：`src/protocol/handshake.hpp` / `.cpp`（对应 C# `SessionHandshakeCod
 
 ```bash
 # 1) 用真实 C# 实现导出黄金向量（三个文件：原语 / 序列 / 线格式）
-cd ServerCpp/tools/VectorDump
-dotnet run -c Release -- "D:/SFS-Multiplayer/ServerCpp/golden"
+cd Server/cpp/tools/VectorDump
+dotnet run -c Release -- "D:/SFS-Multiplayer/Server/cpp/golden"
 
 # 2) C++ 复现并逐字节比对
 cd ../..

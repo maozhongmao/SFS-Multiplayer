@@ -179,7 +179,7 @@ public sealed partial class TcpClientTransport : IDisposable
   // 扩大内核收发缓冲：默认值（Windows 64 KB / Linux 256 KB）在满速同步下会被内核丢包，
   // 而内核丢掉的包对上层就是"丢包"，KCP 只能超时重传 —— 实测把 srtt 从 2ms 抬到近 1 秒，
   // 最后服务端按 heartbeat timeout 把整条会话判死（"玩到一半突然卡顿"）。
-  // 服务端对称地在 ServerCpp/src/net/kcp_transport.cpp 里设同样的值。
+  // 服务端对称地在 Server/cpp/src/net/kcp_transport.cpp 里设同样的值。
   udpSocket.Client.ReceiveBufferSize = 1 << 20;   // 1 MB
   udpSocket.Client.SendBufferSize = 1 << 20;
         conv = NewRandomConv();
@@ -190,7 +190,7 @@ public sealed partial class TcpClientTransport : IDisposable
         // 快速重传阈值（resend）= 0：只走超时重传。resend=2 会在抖动链路上把延迟抖动
         // 误判成丢包并抢先重传，挤占本就拥塞的链路形成正反馈。本协议不靠重传保证送达：
         // 丢掉的最新状态包由下一个状态包补上，位置偏差过大走 200 米硬同步。
-        // 必须与服务端一致（ServerCpp/src/net/kcp_transport.hpp 的 kFastResend）。
+        // 必须与服务端一致（Server/cpp/src/net/kcp_transport.hpp 的 kFastResend）。
         KcpTransportPresets.Apply(kcpContext, KcpTransportPresets.Relay);
 
         connected = true;

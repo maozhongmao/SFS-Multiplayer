@@ -17,7 +17,7 @@ namespace MultiplayerSFS.Common;
 ///
 /// Notes that must not be lost:
 ///  - nodelay / interval / resend / nc are LOCAL SENDER policies; they do not have to
-///    match the peer. The server uses kFastResend (see ServerCpp/src/net/kcp_transport.hpp);
+///    match the peer. The server uses kFastResend (see Server/cpp/src/net/kcp_transport.hpp);
 ///    resend=0 means "timeout retransmit only", resend=2 enables fast retransmit.
 ///  - MTU must stay below the path MTU. IPv6's floor is 1280, so 1400 can black-hole
 ///    behind tunnels/relays; the ipv6safe preset drops to 1200.

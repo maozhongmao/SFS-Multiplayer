@@ -9,7 +9,7 @@
 //   - 字符串 = int32 UTF-8 字节长度 + UTF-8 原始字节
 //   - 字节 0 起始为魔数，线序字节为 "SSF1"（常量值 0x31465353 按小端写出）
 //
-// 权威依据：ServerCpp/golden/wire.txt 中 handshake.* 向量，由真实 C# 实现导出。
+// 权威依据：Server/cpp/golden/wire.txt 中 handshake.* 向量，由真实 C# 实现导出。
 #pragma once
 
 #include <cstddef>

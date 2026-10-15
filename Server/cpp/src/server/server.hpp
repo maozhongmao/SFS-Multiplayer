@@ -169,7 +169,7 @@ private:
 
     struct RocketEntry {
         sfs::protocol::RocketState state;
-        // ---- RAM 压缩（方案 B，见 ServerCpp/RAM-COMPRESSION.md）----
+        // ---- RAM 压缩（方案 B，见 Server/cpp/RAM-COMPRESSION.md）----
         // 冷火箭的部件表以 deflate blob 常驻，state.parts 清空；需要读写的少数路径先 materialize。
         // 只压 parts：热字段（location/rotation/throttle/rcs/name/joints/stages）留在展开态。
         sfs::server::PartsBlob parts_blob;

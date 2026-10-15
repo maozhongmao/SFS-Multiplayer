@@ -88,9 +88,9 @@ ikcp_nodelay(kcp, nodelay, interval, resend, nc);
 - **KCP 是面向流的**：`ikcp_send` 超过 MTU 会分片，接收端一次 `ikcp_recv` 只拿到一个分片。
   应用层消息边界必须自己维护。`sfs::net::KcpTransport` 用 4 字节小端长度前缀解决，
   并以 64 KB 消息在 ARMv7 板子上验证通过。
-- 实现落在 `ServerCpp/src/net/kcp_transport.{hpp,cpp}`（单 UDP 端口 + 按 conv 区分会话 +
-  长度前缀重组），KCP 本体在 `ServerCpp/src/third_party/kcp/`（MIT，保留原许可文本）。
-- 板端自测：`ServerCpp/tests/kcp_echo_test.cpp`，覆盖绑定、会话建立、双向收发与跨 MTU 大消息。
+- 实现落在 `Server/cpp/src/net/kcp_transport.{hpp,cpp}`（单 UDP 端口 + 按 conv 区分会话 +
+  长度前缀重组），KCP 本体在 `Server/cpp/src/third_party/kcp/`（MIT，保留原许可文本）。
+- 板端自测：`Server/cpp/tests/kcp_echo_test.cpp`，覆盖绑定、会话建立、双向收发与跨 MTU 大消息。
 
 ## 实施时待解决
 

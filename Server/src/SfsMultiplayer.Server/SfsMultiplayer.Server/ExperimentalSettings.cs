@@ -10,7 +10,7 @@ namespace SfsMultiplayer.Server;
 public sealed class P2PSettings
 {
     // 默认关闭：直连链路尚不稳定，下个大版本再修。server.yml 里 p2p.enabled: true 可开。
-    // 与 C++ 服务端 P2PSettings::enabled 保持一致（见 ServerCpp/src/server/server.hpp）。
+    // 与 C++ 服务端 P2PSettings::enabled 保持一致（见 Server/cpp/src/server/server.hpp）。
     public bool Enabled { get; set; } = false;
     public double ProximityMeters { get; set; } = 10000;
     public int ValidationIntervalSeconds { get; set; } = 1;

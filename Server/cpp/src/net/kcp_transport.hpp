@@ -20,7 +20,7 @@ namespace sfs::net {
 // 应用层消息在 KCP 字节流之上以 4 字节小端长度前缀切分，所以上层可以继续
 // 按「一帧一条消息」的模型工作，不必关心 KCP 的 MTU 分片。
 //
-// 设计依据见 ServerCpp/docs/ADR-001-kcp-transport.md。
+// 设计依据见 Server/cpp/docs/ADR-001-kcp-transport.md。
 class KcpTransport {
 public:
     // KCP 参数。默认配置是慢的（interval 100ms），这里按 ADR-001 的结论显式设快。

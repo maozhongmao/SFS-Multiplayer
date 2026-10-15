@@ -4,7 +4,7 @@
 
 // 线格式一致性测试：把 C++ 编码结果与 golden/wire.txt 逐字节比对。
 //
-// wire.txt 由 ServerCpp/tools/VectorDump 调用真实 C# 协议实现导出，
+// wire.txt 由 Server/cpp/tools/VectorDump 调用真实 C# 协议实现导出，
 // 是唯一权威。本测试不描述"应该"是什么样，只回答"和 C# 是否一模一样"。
 //
 // 用法：wire_conformance.exe <golden 目录>
