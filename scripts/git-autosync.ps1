@@ -1,10 +1,12 @@
 # scripts/git-autosync.ps1
-# 作用：把工作区里"最新源码"的变化自动提交并推送到 beta 分支。
-# 用途：开机自启 + 每 30 分钟一次 —— 预发布分支 + 网络备份。
-# 特性：
-#   * 只提交 .gitignore 允许的内容（游戏程序集/存档/工具链/构建产物一律不进库）
-#   * 没有变化就什么都不做（不会制造空提交）
-#   * 推送失败只写日志，不会反复弹窗打扰；日志里给出修复提示
+# Purpose: commit the latest source changes and push them to the beta branch.
+# Used by: logon trigger + every 30 minutes -> pre-release branch + offsite backup.
+# NOTE: keep this file ASCII-only. PowerShell 5.1 reads .ps1 as ANSI when there is no BOM,
+#       and a non-ASCII comment has broken the parser here before (see build-release.ps1).
+# Behaviour:
+#   * only commits what .gitignore allows (game assemblies / saves / toolchains / build output stay out)
+#   * does nothing when there are no changes (no empty commits)
+#   * a failed push is logged only; it will not pop dialogs or retry in a loop
 param(
     [string]$Repo = 'D:\SFS-Multiplayer',
     [string]$Branch = 'beta',
@@ -17,19 +19,19 @@ function Write-Log([string]$m) {
 }
 try {
     Set-Location $Repo
-    if (-not (Test-Path '.git')) { Write-Log 'SKIP 不是 git 仓库'; exit 0 }
+    if (-not (Test-Path '.git')) { Write-Log 'SKIP not a git repo'; exit 0 }
 
     $porcelain = git status --porcelain 2>&1
-    if (-not $porcelain) { Write-Log 'OK 无变化，跳过'; exit 0 }
+    if (-not $porcelain) { Write-Log 'OK no changes, skipped'; exit 0 }
 
     git add -A 2>&1 | Out-Null
     $staged = git diff --cached --name-only 2>&1
-    if (-not $staged) { Write-Log 'OK 暂存区为空（变更都被忽略规则挡掉）'; exit 0 }
+    if (-not $staged) { Write-Log 'OK staged empty (all changes ignored)'; exit 0 }
     $count = ($staged | Measure-Object).Count
 
     $msg = 'auto: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + ' (' + $count + ' files)'
     git commit -q -m $msg 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { Write-Log 'WARN commit 失败'; exit 1 }
+    if ($LASTEXITCODE -ne 0) { Write-Log 'WARN commit failed'; exit 1 }
     Write-Log ('COMMIT ' + (git log --oneline -1))
 
     $push = git push origin $Branch 2>&1
@@ -37,7 +39,7 @@ try {
         Write-Log 'PUSH ok'
     } else {
         Write-Log ('PUSH FAILED ' + (($push | Select-Object -Last 3) -join ' | '))
-        Write-Log 'HINT 需要一次凭据配置：见 docs/git-autosync.md（配置一次后即可全自动）'
+        Write-Log 'HINT check credentials (docs/git-autosync.md)'
     }
 } catch {
     Write-Log ('ERROR ' + $_.Exception.Message)
