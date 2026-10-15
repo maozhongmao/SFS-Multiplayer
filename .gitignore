@@ -1,4 +1,4 @@
-# ===================== 构建产物（不入库）=====================
+# ===== 构建产物 =====
 bin/
 obj/
 *.pdb
@@ -17,23 +17,34 @@ Server/*/publish-*/
 Server/dist/
 Server/artifacts/
 ServerCpp/build/
-.smoke-kcp/bin/
-.smoke-kcp/obj/
 
-# ===================== 游戏本体参考程序集（版权物，绝不入库）=====================
+# ===== 二进制/可执行（绝不入库）=====
+*.exe
+*.dll
+*.so
+*.arm
+*.o
+*.a
+*.zip
+
+# ===== 游戏本体参考程序集（版权物）=====
 Client/refs/
 refs/
 
-# ===================== 外部/第三方代码（许可证不同，绝不入库）=====================
+# ===== 外部/第三方代码（许可证不同）=====
 Spaceflight-Simulator-MultiplayerMod-main/
+Spaceflight-Simulator-MultiplayerMod-main*
 Client/upstream-archive/
 
-# ===================== 反编译 / 逆向参考资料 =====================
+# ===== 反编译/归档参考资料 =====
 _quarantine/
 Client/analysis/
+Client/analysis-v1/
+Client/verdix-archive/
+Client/docs/
 docs/sfs-1.6-development/
 
-# ===================== 个人数据（绝不入库）=====================
+# ===== 个人数据 =====
 .audit/
 Rollback-Mods/
 .trash/
@@ -41,31 +52,25 @@ Rollback-Mods/
 Player.log*
 *.dmp
 
-# ===================== 旧源码备份 / 工具链 =====================
-ServerCpp-backup-*/
-ServerCpp-backup-*/
-tools/zig-*/
-tools/frp/
-tools/easytier-launcher/
-tools/board/
-
-# ===================== 杂项 =====================
-NUL
-*.tmp
-*.zip
-Spaceflight-Simulator-MultiplayerMod-main*
-git-autosync.log
+# ===== 工作目录 / 工具 / 临时目录（本会话教训：这些不是源码）=====
 .ackcheck/
 .hermes/
+.smoke-kcp/
+tools/
 deploy/
-smoketest/
 wiki/
-Client/analysis-v1/
-Client/verdix-archive/
-Client/docs/
+smoketest/
+ServerCpp-backup-*/
+
+# ===== 根目录里不进仓库的文档（贴到 GitHub Release 正文）=====
 CHANGELOG.md
 RELEASE-NOTES-V1.4.md
 RELEASE-NOTES-V1.3.5.md
 RELEASE-NOTES-V1.2.4.md
 LICENSE-MPL-2.0.txt
 SECURITY.md
+git-autosync.log
+
+# ===== 杂项 =====
+NUL
+*.tmp
