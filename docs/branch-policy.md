@@ -16,12 +16,14 @@
 3. **外部 PR 隔离区**：别人从 fork 提交的合并请求**先落到 `beta`**，在隔离区里审、编译、实测；
    确认没问题再并进 `main`。`main` 因此始终保持可发布状态。
 
-## 建议在 GitHub 上做的设置
+## GitHub 上的设置（2026-10-15 定案）
 
-- **Settings → General → Default branch**：可把默认分支设为 `beta`，
-  这样外部 fork 的 PR 默认就打向 `beta`（不想改默认分支，就在 README/CONTRIBUTING 里写明"请向 `beta` 提交"）。
-- **Settings → Branches → Branch protection**：给 `main` 加保护（禁止直接 push、要求 PR），
-  `beta` 保持开放以便自动同步与外部 PR。
+- **默认分支保持 `main`** ✓ —— 仓库首页要给外人看**稳定版**；`beta` 每 30 分钟多一条自动提交，
+  当门面太乱。所以**不改默认分支**。
+- **外部 PR 靠文档引导到 `beta`**：参见仓库根目录的 `CONTRIBUTING.md`。
+  GitHub 打开 PR 时可以手选 base 分支，贡献者按指南把 base 改成 `beta` 即可。
+- **给 `main` 加分支规则集（Rulesets）**：Require a pull request before merging + Block force pushes。
+  **`beta` 不加限制**，否则自动同步与外部 PR 都会被挡。
 
 ## 审查外部 PR 的固定动作
 
