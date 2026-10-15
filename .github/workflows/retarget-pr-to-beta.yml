@@ -1,0 +1,36 @@
+# 自动把外部 fork 打向 main 的 PR 改到 beta（隔离区）
+#
+# 背景：GitHub 没有"默认 PR 目标分支 ≠ 默认分支"的设置（官方社区功能请求 #7834 仍未实现）。
+# 所以 main 保持默认分支（外人打开看到稳定版），同时用这个工作流把外部 PR 自动转向 beta。
+#
+# 安全说明（pull_request_target 的正确用法）：
+#   * 本工作流【绝不 checkout】PR 的代码，只调用 GitHub API 改 base / 留言，
+#     因此不存在"执行外部代码"的风险；
+#   * 权限只给 pull-requests: write，最小化。
+name: Redirect external PRs to beta
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+    branches: [main]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  retarget:
+    # 只处理来自 fork 的 PR；本仓库自己开的分支不动
+    if: github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retarget base branch to beta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if gh pr edit "$PR" --repo "$REPO" --base beta; then
+            gh pr comment "$PR" --repo "$REPO" --body "感谢贡献！本仓库的预发布 / 隔离分支是 \`beta\`，已自动把你的目标分支从 \`main\` 改为 \`beta\`。\`main\` 只接受已经在 \`beta\` 上验证过的内容，详见 \`CONTRIBUTING.md\`。"
+          else
+            gh pr comment "$PR" --repo "$REPO" --body "感谢贡献！请把目标分支从 \`main\` 改成 \`beta\`（预发布 / 隔离分支）。详见 \`CONTRIBUTING.md\`。"
+          fi
