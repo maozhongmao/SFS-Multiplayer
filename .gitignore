@@ -55,3 +55,11 @@ NUL
 *.zip
 Spaceflight-Simulator-MultiplayerMod-main*
 git-autosync.log
+.ackcheck/
+.hermes/
+deploy/
+smoketest/
+wiki/
+Client/analysis-v1/
+Client/verdix-archive/
+Client/docs/

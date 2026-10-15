@@ -1,0 +1,38 @@
+# SFS Multiplayer Server configuration.
+# IPv6 must stay quoted because ':' has YAML syntax meaning.
+# IPv4 examples: "0.0.0.0" (all IPv4), "127.0.0.1" (local only).
+# IPv6 examples: "::" (all IPv6), "::1" (local only).
+bind_address: "0.0.0.0"
+port: 9806
+max_connections: 16
+
+# Leave empty to create a new empty world. Relative paths use this file's folder.
+world_path: ""
+state_path: "data/server-state.json"
+auto_save_seconds: 30
+
+# Leave empty for no password. Prefer SFS_SERVER_PASSWORD for private passwords.
+password: ""
+block_duplicate_player_names: true
+
+# Network and chat limits.
+update_rockets_period: 20
+chat_message_cooldown: 3
+max_username_length: 32
+max_chat_message_length: 512
+debug: false
+
+# Experimental features. Leave empty to disable their server-side unlock.
+experimental_access:
+  passphrase: ""
+
+# Experimental P2P feasibility settings.
+# IPv6 endpoints are always represented as quoted strings in YAML.
+p2p:
+  enabled: true
+  proximity_meters: 5000
+  validation_interval_seconds: 1
+  peer_timeout_seconds: 3
+  transition_buffer_seconds: 10
+  max_group_members: 16
+  max_direct_peers_per_client: 8
