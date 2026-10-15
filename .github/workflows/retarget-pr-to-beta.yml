@@ -30,7 +30,7 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
         run: |
           if gh pr edit "$PR" --repo "$REPO" --base beta; then
-            gh pr comment "$PR" --repo "$REPO" --body "感谢贡献！本仓库的预发布 / 隔离分支是 \`beta\`，已自动把你的目标分支从 \`main\` 改为 \`beta\`。\`main\` 只接受已经在 \`beta\` 上验证过的内容，详见 \`CONTRIBUTING.md\`。"
+            gh pr comment "$PR" --repo "$REPO" --body "感谢贡献！本仓库的预发布 / 隔离分支是 \`beta\`，已自动把你的目标分支从 \`main\` 改为 \`beta\`。\`main\` 是稳定发布线，只接受已经在 \`beta\` 上验证过的内容。"
           else
-            gh pr comment "$PR" --repo "$REPO" --body "感谢贡献！请把目标分支从 \`main\` 改成 \`beta\`（预发布 / 隔离分支）。详见 \`CONTRIBUTING.md\`。"
+            gh pr comment "$PR" --repo "$REPO" --body "感谢贡献！请把目标分支从 \`main\` 改成 \`beta\`（预发布 / 隔离分支）。\`main\` 是稳定发布线。"
           fi
