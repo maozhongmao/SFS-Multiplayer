@@ -74,3 +74,4 @@ git-autosync.log
 # ===== 杂项 =====
 NUL
 *.tmp
+git-autosync.log*
