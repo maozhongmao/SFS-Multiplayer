@@ -29,7 +29,10 @@ public class LocalRocket
 		parts = new Dictionary<int, Part>(rocket.partHolder.partsSet.Count);
 		foreach (Part item in rocket.partHolder.partsSet)
 		{
-			parts.InsertNew(item);
+			// 【确定性 id】必须与 RocketState 那条路算出同一个号，否则本地又出现两套编号
+			int id = IDExtensions.DeterministicPartID(new PartSave(item));
+			while (parts.ContainsKey(id)) id = id == int.MaxValue ? 1 : id + 1;
+			parts.Add(id, item);
 		}
 		interpolator = rocket.gameObject.AddComponent<Interpolator>();
 		interpolator.rocket = this;
@@ -64,6 +67,62 @@ public class LocalRocket
 				select new JointState(GetPartID(pj.a), GetPartID(pj.b))).ToList(),
 			stages = rocket.staging.stages.Select((Stage s) => new StageState(s.stageId, s.parts.Where((Part p) => p != null).Select(GetPartID).ToList())).ToList()
 		};
+	}
+
+	// 【结构指纹修正 2026-10-09】parts 是"活体 GameObject 字典"，零件被摧毁后条目会留成 null。
+	// ToState() 外发时会过滤 null，所以发给服务端的状态一直是对的；但 parts.Count 会把 null 也算进去，
+	// 拿它跟服务端的零件数比就永远"对不上" —— 结果是每 8 秒白重建一次（75 部件 Instantiate、
+	// 火箭瞬间"变空气"、插值被重置）。结构指纹必须只数活体。
+	public int LivePartCount()
+	{
+		int count = 0;
+		foreach (KeyValuePair<int, Part> kvp in parts)
+		{
+			if (kvp.Value != null) count++;
+		}
+		return count;
+	}
+
+	// 已摧毁但仍在字典里留下空条目的数量。对外发状态无影响（ToState() 会过滤），
+	// 但它是"结构指纹被骗"的直接证据，所以要能单独量出来。
+	public int DeadPartCount()
+	{
+		int count = 0;
+		foreach (KeyValuePair<int, Part> kvp in parts)
+		{
+			if (kvp.Value == null) count++;
+		}
+		return count;
+	}
+
+	// 清掉已摧毁留下的空条目（只是卫生，不影响外发：ToState() 本来就过滤）。
+	// 【任务 #9】返回值 = 本次真正清掉的空条目数（0 = 没有任何变化），调用方据此决定是否打日志。
+	// 只删 null：取到 key 后删除前再确认一次当前值仍是 null，保证绝不误删活体零件 ——
+	// 因此 LivePartCount() / idSetMismatch / ToState() 的结果都不受影响。
+	public int PruneDestroyedParts()
+	{
+		if (parts == null || parts.Count == 0) return 0;
+		List<int> dead = null;
+		foreach (KeyValuePair<int, Part> kvp in parts)
+		{
+			if (kvp.Value == null)
+			{
+				if (dead == null) dead = new List<int>();
+				dead.Add(kvp.Key);
+			}
+		}
+		if (dead == null) return 0;
+		int pruned = 0;
+		for (int i = 0; i < dead.Count; i++)
+		{
+			// 删除前复核：只有仍然是 null 才删（防止同一 key 在这一瞬间又被填成活体）
+			if (parts.TryGetValue(dead[i], out Part current) && current == null)
+			{
+				parts.Remove(dead[i]);
+				pruned++;
+			}
+		}
+		return pruned;
 	}
 
 	public int GetPartID(Part part)

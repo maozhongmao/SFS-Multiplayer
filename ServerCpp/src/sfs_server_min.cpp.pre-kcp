@@ -1,0 +1,1367 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// SFS Multiplayer 服务端 —— C++ / ARM 常驻版（第一阶段）。
+//
+// 本文件只做“能连上、能握手、能保活”，不含火箭/部件同步业务逻辑。
+// 目的：在 Luckfox Lume（ARMv7 / 88MB RAM）上取一份真实的内存与 CPU 基线，
+// 与 C# 版（VmRSS 34832 kB / VmSize 245908 kB / 15 线程）逐项对比。
+//
+// 单线程 epoll，无额外工作线程，不写任何持久化文件。
+
+#include "protocol/codec.hpp"
+#include "protocol/handshake.hpp"
+#include "protocol/server_info.hpp"
+#include "protocol/models/packets.hpp"
+#include "protocol/models/part_packets.hpp"
+#include "protocol/models/state.hpp"
+#include "protocol/models/docking.hpp"
+#include "protocol/models/timewarp.hpp"
+#include "protocol/models/p2p.hpp"
+#include "protocol/models/experimental.hpp"
+#include "state_store.hpp"
+#include "json_lite.hpp"
+#include "net/lidgren_buffer.hpp"
+
+#include <algorithm>
+#include <random>
+#include <arpa/inet.h>
+#include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <fstream>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <signal.h>
+#include <string>
+#include <sys/epoll.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace {
+
+using sfs::protocol::TcpFrame;
+using sfs::protocol::TcpFrameKind;
+using sfs::protocol::kMaxTcpPayloadBytes;
+using sfs::protocol::kProtocolVersion;
+
+// EncodeTcpFrame 的帧体头长度：kind(1) + sequence(4) + payload_bits(4)
+constexpr std::size_t kTcpBodyHeaderBytes = 9;
+constexpr int kMaxPlayers = 16;
+constexpr std::size_t kMaxRecvBuffer = 1u << 20;  // 单连接接收缓冲上限 1MB
+
+std::atomic<bool> g_running{true};
+
+void on_signal(int) { g_running = false; }
+
+void set_nonblock(int fd) {
+    const int flags = fcntl(fd, F_GETFL, 0);
+    if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+std::int32_t now_millis() {
+    using namespace std::chrono;
+    return static_cast<std::int32_t>(
+        duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count());
+}
+
+// .NET DateTime.UtcNow.Ticks 等价：自 0001-01-01 起的 100 纳秒数。
+// 服务端心跳 Ping 用它做时间戳，客户端原样回显，服务端据此算 RTT。
+// （客户端 TcpTransportCore 的 UpdateRoundTrip 也按同样的 ticks 语义解读）
+constexpr std::int64_t kDotNetEpochOffsetSeconds = 62135596800LL;  // 1970-01-01 之前的秒数
+
+std::int64_t now_dotnet_ticks() {
+    using namespace std::chrono;
+    const auto micros = duration_cast<microseconds>(
+        system_clock::now().time_since_epoch()).count();
+    return (micros + kDotNetEpochOffsetSeconds * 1000000LL) * 10LL;
+}
+
+// 单调时钟：世界时间推进只依赖它，不受系统时间调整影响
+double steady_seconds_since(std::chrono::steady_clock::time_point origin) {
+    return std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - origin).count();
+}
+
+// 读取 /proc/self/status 里的 VmRSS / VmSize / Threads（单位 kB）
+struct SelfStats {
+    long vm_rss_kb = -1;
+    long vm_size_kb = -1;
+    long threads = -1;
+    long utime = -1;
+    long stime = -1;
+};
+
+SelfStats read_self_stats() {
+    SelfStats s;
+    std::ifstream in("/proc/self/status");
+    std::string line;
+    while (std::getline(in, line)) {
+        auto grab = [&line](const char* key) -> long {
+            const std::size_t p = line.find(key);
+            if (p == std::string::npos) return -1;
+            return std::strtol(line.c_str() + p + std::strlen(key), nullptr, 10);
+        };
+        if (line.rfind("VmRSS:", 0) == 0) s.vm_rss_kb = grab("VmRSS:");
+        else if (line.rfind("VmSize:", 0) == 0) s.vm_size_kb = grab("VmSize:");
+        else if (line.rfind("Threads:", 0) == 0) s.threads = grab("Threads:");
+    }
+    std::ifstream stat("/proc/self/stat");
+    std::string tok;
+    for (int i = 1; stat >> tok; ++i) {
+        if (i == 14) s.utime = std::strtol(tok.c_str(), nullptr, 10);
+        if (i == 15) { s.stime = std::strtol(tok.c_str(), nullptr, 10); break; }
+    }
+    return s;
+}
+
+struct Connection {
+    int fd = -1;
+    std::uint64_t id = 0;
+    std::vector<std::uint8_t> recv;
+    std::vector<std::uint8_t> out;
+    std::int32_t next_seq = 1;
+    std::int32_t player_id = -1;
+    std::string username;
+    std::string udp_token;
+    bool handshaked = false;
+    bool write_wait = false;
+    // 心跳：服务端每 2 秒发一次 Ping，客户端原样回 Pong，据此算 RTT 并下发世界时间
+    std::int64_t last_ping_ticks = 0;
+    std::int64_t last_pong_ticks = 0;
+    double rtt_ms = 0.0;
+    double jitter_ms = 0.0;
+    std::chrono::steady_clock::time_point last_receive = std::chrono::steady_clock::now();
+    std::string udp_addr;      // 客户端 UDP 源地址（Bind 时记下）
+    std::uint16_t udp_port = 0;
+    std::string resume_token;  // 断线重连用（对齐 C# ResumeToken）
+};
+
+class Server {
+public:
+    Server(std::uint16_t port, std::int32_t max_players, std::string state_path)
+        : port_(port), max_players_(max_players), state_path_(std::move(state_path)) {}
+
+    bool start() {
+        epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
+        if (epoll_fd_ < 0) { std::perror("epoll_create1"); return false; }
+
+        if (!open_tcp()) return false;
+        if (!open_udp()) return false;
+
+        std::printf("[cpp-server] listening on TCP+UDP port %u, max_players=%d\n",
+                    static_cast<unsigned>(port_), max_players_);
+        std::fflush(stdout);
+        load_world_from_disk();
+        return true;
+    }
+
+    void run() {
+        epoll_event events[64];
+        auto next_report = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (g_running) {
+            const int n = epoll_wait(epoll_fd_, events, 64, 500);
+            if (n < 0) {
+                if (errno == EINTR) continue;
+                std::perror("epoll_wait");
+                break;
+            }
+            for (int i = 0; i < n; ++i) {
+                const int fd = events[i].data.fd;
+                const std::uint32_t ev = events[i].events;
+                if (fd == listen_fd_) { accept_loop(); continue; }
+                if (fd == udp_fd_) { if (ev & EPOLLIN) drain_udp(); continue; }
+                handle_connection_event(fd, ev);
+            }
+
+            // 心跳：每 2 秒给每个已握手玩家发一次 Ping（对齐 C# MaintenanceLoop 的 _heartbeatClock）
+            // 客户端原样回 Pong，服务端在 Pong 处理里下发 UpdateWorldTime —— 客户端的世界时间靠这个推进，
+            // 不发 Ping 会导致客户端游戏时间停滞（表现为整体卡死）。
+            if (std::chrono::steady_clock::now() - last_heartbeat_ >= std::chrono::seconds(2)) {
+                last_heartbeat_ = std::chrono::steady_clock::now();
+                const std::int64_t ticks = now_dotnet_ticks();
+                for (auto& [cfd, c] : conns_) {
+                    if (!c.handshaked) continue;
+                    // 10 秒无接收判掉线（对齐 C# LastReceiveUtc 检查）
+                    if (steady_seconds_since(c.last_receive) > 10.0) {
+                        pending_disconnects_.push_back(cfd);
+                        continue;
+                    }
+                    c.last_ping_ticks = ticks;
+                    c.last_pong_ticks = 0;
+                    sfs::net::NetWriter body;
+                    body.write_i64(ticks);
+                    auto data = body.get_bytes();
+                    send_frame(cfd, TcpFrame{TcpFrameKind::Ping, c.next_seq++, data,
+                                            static_cast<std::int32_t>(body.get_bit_length())});
+                }
+                // 掉线清理放在遍历外，避免边遍历边改容器
+                for (auto dfd : pending_disconnects_) close_conn(dfd, "heartbeat timeout");
+                pending_disconnects_.clear();
+            }
+
+            // 自动存档（对齐 server.yml 的 auto_save_seconds: 30）
+            if (std::chrono::steady_clock::now() - last_autosave_ >= std::chrono::seconds(30)) {
+                last_autosave_ = std::chrono::steady_clock::now();
+                save_world_to_disk();
+            }
+
+            if (std::chrono::steady_clock::now() >= next_report) {
+                report("periodic");
+                next_report = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            }
+        }
+        report("final");
+    }
+
+    void stop() { g_running = false; }
+
+private:
+    // ---------------------------------------------------------- 套接字初始化
+    bool open_tcp() {
+        listen_fd_ = ::socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        if (listen_fd_ < 0) { std::perror("tcp socket"); return false; }
+        int yes = 1;
+        setsockopt(listen_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port_);
+        if (::bind(listen_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            std::perror("tcp bind");
+            return false;
+        }
+        if (::listen(listen_fd_, SOMAXCONN) < 0) { std::perror("tcp listen"); return false; }
+        epoll_add(listen_fd_, EPOLLIN);
+        return true;
+    }
+
+    bool open_udp() {
+        udp_fd_ = ::socket(AF_INET, SOCK_DGRAM | SOCK_NONBLOCK, 0);
+        if (udp_fd_ < 0) { std::perror("udp socket"); return false; }
+        int yes = 1;
+        setsockopt(udp_fd_, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+        sockaddr_in addr{};
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port_);
+        if (::bind(udp_fd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
+            std::perror("udp bind");
+            return false;
+        }
+        epoll_add(udp_fd_, EPOLLIN);
+        return true;
+    }
+
+    void epoll_add(int fd, std::uint32_t events) {
+        epoll_event ev{};
+        ev.events = events;
+        ev.data.fd = fd;
+        epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev);
+    }
+
+    void epoll_mod(int fd, std::uint32_t events) {
+        epoll_event ev{};
+        ev.events = events;
+        ev.data.fd = fd;
+        epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd, &ev);
+    }
+
+    // ---------------------------------------------------------- 连接管理
+    void accept_loop() {
+        while (true) {
+            sockaddr_in peer{};
+            socklen_t len = sizeof(peer);
+            const int fd = ::accept4(listen_fd_, reinterpret_cast<sockaddr*>(&peer), &len, SOCK_NONBLOCK);
+            if (fd < 0) {
+                if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+                return;
+            }
+            if (static_cast<int>(conns_.size()) >= kMaxPlayers * 4) {
+                ::close(fd);
+                continue;
+            }
+            int yes = 1;
+            setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+
+            Connection c;
+            c.fd = fd;
+            c.id = ++next_conn_id_;
+            conns_.emplace(fd, std::move(c));
+            // 先注册 EPOLLIN，发送时再按需加 EPOLLOUT
+            epoll_add(fd, EPOLLIN);
+
+            char ip[INET_ADDRSTRLEN] = {0};
+            inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof(ip));
+            std::printf("[cpp-server] +conn #%llu from %s:%u\n",
+                        static_cast<unsigned long long>(conns_[fd].id), ip,
+                        static_cast<unsigned>(ntohs(peer.sin_port)));
+            std::fflush(stdout);
+        }
+    }
+
+    void close_conn(int fd, const char* why) {
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return;
+        if (connected_fds_.erase(fd) > 0) --player_count_;
+        if (!it->second.udp_token.empty()) token_to_fd_.erase(it->second.udp_token);
+        // 清理该玩家的控制声明与权威，并广播离开事件（对齐 C# 断线处理）
+        if (it->second.handshaked && it->second.player_id >= 0) {
+            const std::int32_t pid = it->second.player_id;
+            controlled_rocket_.erase(pid);
+            update_authority_.erase(pid);
+            players_.erase(pid);
+            sfs::protocol::PlayerDisconnectedPacket disc;
+            disc.player_id = pid;
+            broadcast_packet(static_cast<std::uint8_t>(sfs::protocol::PacketType::kPlayerDisconnected),
+                             disc, fd);
+            refresh_authorities();
+        }
+        std::printf("[cpp-server] -conn #%llu (%s)\n",
+                    static_cast<unsigned long long>(it->second.id), why);
+        std::fflush(stdout);
+        epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, fd, nullptr);
+        ::close(fd);
+        conns_.erase(it);
+    }
+
+    void handle_connection_event(int fd, std::uint32_t ev) {
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return;
+        Connection& c = it->second;
+
+        if (ev & (EPOLLERR | EPOLLHUP)) { close_conn(fd, "hangup"); return; }
+
+        if (ev & EPOLLIN) {
+            std::uint8_t buf[8192];
+            while (true) {
+                const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+                if (n > 0) {
+                    c.recv.insert(c.recv.end(), buf, buf + n);
+                    if (c.recv.size() > kMaxRecvBuffer) { close_conn(fd, "recv overflow"); return; }
+                    continue;
+                }
+                if (n == 0) { close_conn(fd, "peer closed"); return; }
+                if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+                close_conn(fd, "recv error");
+                return;
+            }
+            if (!drain_frames(fd)) return;
+        }
+
+        if (ev & EPOLLOUT) {
+            auto jt = conns_.find(fd);
+            if (jt == conns_.end()) return;
+            flush(jt->second);
+        }
+    }
+
+    // ---------------------------------------------------------- 帧解析
+    bool drain_frames(int fd) {
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return false;
+        Connection& c = it->second;
+
+        std::size_t consumed = 0;
+        while (true) {
+            const std::size_t avail = c.recv.size() - consumed;
+            if (avail < sizeof(std::int32_t)) break;
+
+            std::int32_t body_len = 0;
+            std::memcpy(&body_len, c.recv.data() + consumed, sizeof(body_len));
+            if (body_len < static_cast<std::int32_t>(kTcpBodyHeaderBytes)
+                || static_cast<std::size_t>(body_len) > kMaxTcpPayloadBytes + kTcpBodyHeaderBytes) {
+                close_conn(fd, "bad frame length");
+                return false;
+            }
+            const std::size_t total = sizeof(std::int32_t) + static_cast<std::size_t>(body_len);
+            if (avail < total) break;
+
+            std::vector<std::uint8_t> raw(c.recv.begin() + consumed,
+                                          c.recv.begin() + consumed + total);
+            consumed += total;
+
+            TcpFrame frame;
+            try {
+                frame = sfs::protocol::DecodeTcpFrame(raw);
+            } catch (const std::exception& e) {
+                std::printf("[cpp-server] decode error: %s\n", e.what());
+                std::fflush(stdout);
+                close_conn(fd, "decode error");
+                return false;
+            }
+            handle_frame(fd, frame);
+            if (conns_.find(fd) == conns_.end()) return false;
+        }
+
+        if (consumed > 0) {
+            auto jt = conns_.find(fd);
+            if (jt == conns_.end()) return false;
+            jt->second.recv.erase(jt->second.recv.begin(), jt->second.recv.begin() + consumed);
+        }
+        return true;
+    }
+
+    // ---------------------------------------------------------- 帧处理
+    void handle_frame(int fd, const TcpFrame& frame) {
+        // 任何帧都算"活着"，用于 10 秒无接收掉线判定
+        {
+            auto rit = conns_.find(fd);
+            if (rit != conns_.end()) rit->second.last_receive = std::chrono::steady_clock::now();
+        }
+        switch (frame.kind) {
+            case TcpFrameKind::ServerInfoRequest: {
+                // 登录前的探测：只回人数，不建会话。
+                // 客户端 JoinMenu 用 Sequence=0 发探测，且只校验 Kind，不校验 Sequence。
+                const auto payload = sfs::protocol::EncodeServerInfoResponse(
+                    player_count_, kMaxPlayers);
+                send_frame(fd, TcpFrame{TcpFrameKind::ServerInfoResponse, 0,
+                                        payload, static_cast<std::int32_t>(payload.size() * 8)});
+                break;
+            }
+            case TcpFrameKind::Hello: {
+                // 握手帧的 Sequence 不是序号，而是握手版本号（客户端与 C# 服务端都这么约定）。
+                // 客户端 TcpTransportCore.cs:389 会校验 ack.Sequence == SessionHandshakeCodec.Version，
+                // 回错值客户端直接报 "Server returned an invalid session handshake."。
+                if (frame.sequence != sfs::protocol::kHandshakeVersion) {
+                    std::printf("[cpp-server] handshake version mismatch: client=%d server=%d\n",
+                                frame.sequence, sfs::protocol::kHandshakeVersion);
+                    std::fflush(stdout);
+                    send_control(fd, TcpFrameKind::Disconnect);
+                    close_conn(fd, "handshake version mismatch");
+                    break;
+                }
+                sfs::protocol::JoinRequest req;
+                try {
+                    req = sfs::protocol::DecodeHello(frame.payload);
+                } catch (const std::exception& e) {
+                    std::printf("[cpp-server] Hello decode failed: %s\n", e.what());
+                    std::fflush(stdout);
+                    send_control(fd, TcpFrameKind::Disconnect);
+                    close_conn(fd, "bad hello");
+                    break;
+                }
+                auto it = conns_.find(fd);
+                if (it == conns_.end()) break;
+                Connection& c = it->second;
+                if (!c.handshaked) {
+                    c.handshaked = true;
+
+                    // 断线重连判定（对齐 C#：ResumePlayerId >= 0 且 token 匹配则复用原会话，
+                    // player_id 与两个 token 全部保持不变）
+                    const bool is_resume = req.resume_player_id >= 0
+                        && !req.resume_token.empty()
+                        && players_.count(req.resume_player_id) > 0
+                        && players_[req.resume_player_id].can_resume(req.resume_token);
+
+                    if (is_resume) {
+                        const std::int32_t pid = req.resume_player_id;
+                        PlayerInfo& info = players_[pid];
+                        c.player_id = pid;
+                        c.username = info.name;
+                        c.udp_token = info.udp_token;
+                        c.resume_token = info.resume_token;
+                        // 旧连接若还挂着，摘掉它的玩家身份，避免同一玩家有两个活会话
+                        for (auto& [ofd, oc] : conns_) {
+                            if (ofd != fd && oc.handshaked && oc.player_id == pid) {
+                                oc.player_id = -1;
+                                oc.handshaked = false;
+                            }
+                        }
+                        std::printf("[cpp-server] 会话恢复: player=%d user='%s'\n",
+                                    pid, c.username.c_str());
+                        std::fflush(stdout);
+                    } else {
+                        c.player_id = ++next_player_id_;
+                        c.username = req.username;
+                        // 对齐 C#：两个 token 都是 48 位随机 hex（不是用户名拼接）
+                        c.udp_token = random_token();
+                        c.resume_token = random_token();
+                        PlayerInfo info;
+                        info.name = req.username;
+                        info.color = random_color();
+                        info.udp_token = c.udp_token;
+                        info.resume_token = c.resume_token;
+                        players_[c.player_id] = info;
+                    }
+
+                    token_to_fd_[c.udp_token] = fd;
+                    connected_fds_.insert(fd);
+                }
+
+                sfs::protocol::JoinResponse resp;
+                resp.player_id = c.player_id;
+                resp.update_rockets_period = 50.0;   // 对齐 C# 服务端实际下发的值
+                resp.chat_message_cooldown = 3.0;
+                resp.world_time = 0.0;
+                resp.send_time = now_millis();
+                resp.difficulty = 0;                 // DifficultyType.Normal
+                resp.solar_system_name = std::string();   // 对齐 C#：服务端下发空串
+                resp.udp_session_token = c.udp_token;
+                resp.resume_token = c.resume_token;
+
+                const auto payload = sfs::protocol::EncodeAck(resp);
+                send_frame(fd, TcpFrame{TcpFrameKind::HelloAck, sfs::protocol::kHandshakeVersion,
+                                        payload,
+                                        static_cast<std::int32_t>(payload.size() * 8)});
+                std::printf("[cpp-server] handshake ok: player=%d user='%s'\n",
+                            c.player_id, c.username.c_str());
+                std::fflush(stdout);
+
+                // 对齐 C# SendInitialState：加入时按固定顺序补齐客户端所需状态。
+                // 顺序不能乱 —— 客户端靠 UpdatePlayerControl 知道谁在开哪枚火箭，
+                // 靠 TimeWarp(Applied) 初始化时间倍率。
+                send_initial_state(fd, c.player_id, c.username);
+                refresh_authorities();
+                break;
+            }
+            case TcpFrameKind::Ping:
+                // 客户端也会主动发 Ping（它自己的 HeartbeatLoop），原样回显即可：
+                // 客户端把发送时刻的 ticks 放在 payload 里，收到 Pong 后用 UpdateRoundTrip 反算 RTT。
+                // 回空 payload 会让客户端的延迟显示永远为空。
+                send_frame(fd, TcpFrame{TcpFrameKind::Pong, frame.sequence,
+                                        frame.payload, frame.payload_bits});
+                break;
+            case TcpFrameKind::Pong: {
+                // 服务端心跳 Ping 的回显 —— 世界时间就在这里下发（对齐 C# HandlePong）。
+                // 客户端的世界时间完全由服务端驱动，不下发就会导致游戏时间停滞。
+                auto pit = conns_.find(fd);
+                if (pit == conns_.end()) break;
+                Connection& c = pit->second;
+                if (frame.payload.size() < 8) break;
+
+                std::int64_t sent_ticks = 0;
+                std::memcpy(&sent_ticks, frame.payload.data(), 8);
+                // 必须是最新一次 Ping 的原样回显，否则丢弃（对齐 C# RecordHeartbeatPong）
+                if (c.last_ping_ticks == 0 || sent_ticks != c.last_ping_ticks
+                    || c.last_pong_ticks == sent_ticks) {
+                    break;
+                }
+                c.last_pong_ticks = sent_ticks;
+                const std::int64_t delta_ticks = now_dotnet_ticks() - sent_ticks;
+                c.rtt_ms = delta_ticks > 0 ? static_cast<double>(delta_ticks) / 10000.0 : 0.0;
+                if (c.rtt_ms > 0.0) {
+                    c.jitter_ms = c.jitter_ms <= 0.0
+                        ? 0.0
+                        : c.jitter_ms * 0.8 + std::abs(c.rtt_ms - c.rtt_ms) * 0.2;
+                }
+
+                // 世界时间 = 基准 + 经过秒数×倍率，再补偿单程延迟（与 C# 完全一致）
+                sfs::protocol::UpdateWorldTimePacket wt;
+                wt.world_time = world_time() + c.rtt_ms / 2000.0 * time_scale_;
+                send_packet(fd, static_cast<std::uint8_t>(sfs::protocol::PacketType::kUpdateWorldTime), wt);
+                break;
+            }
+            case TcpFrameKind::Disconnect:
+                send_control(fd, TcpFrameKind::Disconnect);
+                close_conn(fd, "client disconnect");
+                break;
+            case TcpFrameKind::Packet: {
+                // 业务包：分发给 handle_packet 处理（创建/销毁/同步/聊天等）
+                ++packet_count_;
+                if (!frame.payload.empty()) last_packet_type_ = frame.payload[0];
+                // 单个坏包只丢弃该包并记录，绝不终止进程（真实客户端异常包不能拖垮服务端）
+                try {
+                    handle_packet(fd, frame.payload, frame.payload_bits);
+                } catch (const std::exception& e) {
+                    ++bad_packets_;
+                    std::printf("[cpp-server] packet %u from player dropped: %s\n",
+                                frame.payload.empty() ? 0u : frame.payload[0], e.what());
+                    std::fflush(stdout);
+                }
+                break;
+            }
+            case TcpFrameKind::RequestWorldSnapshot: {
+                // 客户端请求完整世界快照
+                send_world_snapshot(fd);
+                break;
+            }
+            case TcpFrameKind::RequestRocketSnapshot: {
+                // 单火箭快照（简化：复用世界快照）
+                send_world_snapshot(fd);
+                break;
+            }
+            default:
+                ++unknown_frames_;
+                break;
+        }
+    }
+
+    std::int32_t next_seq(int fd) {
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return 1;
+        return it->second.next_seq++;
+    }
+
+    void send_control(int fd, TcpFrameKind kind) {
+        send_frame(fd, TcpFrame{kind, next_seq(fd), {}, 0});
+    }
+
+    void send_frame(int fd, const TcpFrame& frame) {
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return;
+        try {
+            auto bytes = sfs::protocol::EncodeTcpFrame(frame);
+            it->second.out.insert(it->second.out.end(), bytes.begin(), bytes.end());
+        } catch (const std::exception& e) {
+            std::printf("[cpp-server] encode error: %s\n", e.what());
+            std::fflush(stdout);
+            return;
+        }
+        flush(it->second);
+    }
+
+    void flush(Connection& c) {
+        if (c.fd < 0) return;
+        while (!c.out.empty()) {
+            const ssize_t n = ::send(c.fd, c.out.data(), c.out.size(), MSG_NOSIGNAL);
+            if (n > 0) {
+                c.out.erase(c.out.begin(), c.out.begin() + n);
+                continue;
+            }
+            if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                if (!c.write_wait) { c.write_wait = true; epoll_mod(c.fd, EPOLLIN | EPOLLOUT); }
+                return;
+            }
+            close_conn(c.fd, "send error");
+            return;
+        }
+        if (c.write_wait) { c.write_wait = false; epoll_mod(c.fd, EPOLLIN); }
+    }
+
+    // ---------------------------------------------------------- UDP
+    void drain_udp() {
+        std::uint8_t buf[2048];
+        while (true) {
+            sockaddr_in src{};
+            socklen_t len = sizeof(src);
+            const ssize_t n = ::recvfrom(udp_fd_, buf, sizeof(buf), 0,
+                                         reinterpret_cast<sockaddr*>(&src), &len);
+            if (n <= 0) {
+                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) return;
+                return;
+            }
+            ++udp_datagrams_;
+            std::vector<std::uint8_t> raw(buf, buf + n);
+            sfs::protocol::UdpEnvelope env;
+            try {
+                env = sfs::protocol::DecodeUdpEnvelope(raw);
+            } catch (const std::exception&) {
+                ++udp_bad_;
+                continue;
+            }
+            // token 必须匹配某个已握手玩家，否则不回 Ack、不处理（对齐 C# HandleUdpDatagram）
+            auto tit = token_to_fd_.find(env.token);
+            if (tit == token_to_fd_.end()) { ++udp_bad_; continue; }
+            const int owner_fd = tit->second;
+            auto oit = conns_.find(owner_fd);
+            if (oit == conns_.end() || !oit->second.handshaked) { ++udp_bad_; continue; }
+            oit->second.last_receive = std::chrono::steady_clock::now();
+            // 记住客户端 UDP 源地址，供服务端主动下发 UDP 状态
+            oit->second.udp_addr = inet_ntoa(src.sin_addr);
+            oit->second.udp_port = ntohs(src.sin_port);
+
+            if (env.kind == static_cast<std::uint8_t>(sfs::protocol::UdpKind::Bind)) {
+                // 只对空 payload 的 Bind 回 Ack（对齐 C#：return payload.Length == 0）
+                if (!env.payload.empty()) { continue; }
+                const auto reply = sfs::protocol::EncodeUdpEnvelope(
+                    sfs::protocol::UdpKind::BindAck, env.token, {});
+                ::sendto(udp_fd_, reply.data(), reply.size(), MSG_NOSIGNAL,
+                         reinterpret_cast<sockaddr*>(&src), len);
+                ++udp_binds_;
+                continue;
+            }
+
+            if (env.kind == static_cast<std::uint8_t>(sfs::protocol::UdpKind::Data)) {
+                // 客户端把位置更新走 UDP 直发；payload 就是完整的 Packet 载荷，走同一套业务处理
+                ++udp_data_;
+                if (env.payload.empty()) continue;
+                try {
+                    handle_packet(owner_fd, env.payload,
+                                  static_cast<std::int32_t>(env.payload.size() * 8));
+                } catch (const std::exception& e) {
+                    ++bad_packets_;
+                    std::printf("[cpp-server] udp packet from player %d dropped: %s\n",
+                                oit->second.player_id, e.what());
+                    std::fflush(stdout);
+                }
+                continue;
+            }
+            ++udp_bad_;
+        }
+    }
+
+    // ---------------------------------------------------------- 统计
+    void report(const char* tag) {
+        const auto s = read_self_stats();
+        std::printf("[cpp-server][%s] rss=%ldkB vm=%ldkB threads=%ld conns=%zu players=%d "
+                    "pkts=%llu bad=%llu snap=%llu rockets=%zu udp=%llu(data=%llu bind=%llu bad=%llu) cpu=%ld.%02lds\n",
+                    tag, s.vm_rss_kb, s.vm_size_kb, s.threads, conns_.size(), player_count_,
+                    static_cast<unsigned long long>(packet_count_),
+                    static_cast<unsigned long long>(bad_packets_),
+                    static_cast<unsigned long long>(snapshot_requests_),
+                    rockets_.size(),
+                    static_cast<unsigned long long>(udp_datagrams_),
+                    static_cast<unsigned long long>(udp_data_),
+                    static_cast<unsigned long long>(udp_binds_),
+                    static_cast<unsigned long long>(udp_bad_),
+                    (s.utime + s.stime) / 100, (s.utime + s.stime) % 100);
+        std::fflush(stdout);
+    }
+
+        // ============================================================
+    // 游戏状态（严格对齐 C# TcpMultiplayerServer 的处理流程）
+    // ============================================================
+
+    struct RocketEntry {
+        sfs::protocol::RocketState state;
+        std::int32_t owner_player = -1;   // 创建者，仅用于权限判定
+    };
+
+    std::unordered_map<std::int32_t, RocketEntry> rockets_;
+    std::string state_path_;          // 存档路径（server.yml 的 state_path）
+    std::mt19937 rng_{std::random_device{}()};
+    std::chrono::steady_clock::time_point last_autosave_ = std::chrono::steady_clock::now();
+
+    // 对齐 C# NextRocketId：1..INT_MAX 随机，避开已有 ID。
+    // （存档里的 ID 是这种大随机数，用自增 1,2,3 会和存档冲突）
+    std::int32_t next_rocket_id() {
+        std::uniform_int_distribution<std::int32_t> dist(1, std::numeric_limits<std::int32_t>::max());
+        for (int attempt = 0; attempt < 200; ++attempt) {
+            const std::int32_t id = dist(rng_);
+            if (!rockets_.count(id)) return id;
+        }
+        for (std::int32_t id = 1;; ++id) {
+            if (!rockets_.count(id)) return id;
+        }
+    }
+
+private:
+    // 对齐 C# Convert.ToHexString(RandomNumberGenerator.GetBytes(24))：48 个十六进制字符
+    std::string random_token() {
+        static const char* kHex = "0123456789ABCDEF";
+        std::uniform_int_distribution<int> dist(0, 255);
+        std::string out;
+        out.reserve(48);
+        for (int i = 0; i < 24; ++i) {
+            const int b = dist(rng_);
+            out.push_back(kHex[b >> 4]);
+            out.push_back(kHex[b & 0x0F]);
+        }
+        return out;
+    }
+
+public:
+    // ---------------------------------------------------------- 加入时的初启状态
+    // 严格对齐 C# TcpServer.SendInitialState 的顺序与内容。
+    void send_initial_state(int fd, std::int32_t joining_id, const std::string& joining_name) {
+        using PT = sfs::protocol::PacketType;
+
+        // ① 按 player_id 升序，把每个在线玩家（含自己）告知新玩家
+        std::vector<std::pair<std::int32_t, int>> peers;  // (player_id, fd)
+        for (const auto& [cfd, c] : conns_) {
+            if (c.handshaked && c.player_id >= 0) peers.emplace_back(c.player_id, cfd);
+        }
+        std::sort(peers.begin(), peers.end(),
+                  [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        for (const auto& [pid, _] : peers) {
+            auto pit = players_.find(pid);
+            if (pit == players_.end()) continue;
+
+            sfs::protocol::PlayerConnectedPacket pc;
+            pc.player_id = pid;
+            pc.username = pit->second.name;
+            pc.icon_color = pit->second.color;
+            pc.print_message = false;
+            send_packet(fd, static_cast<std::uint8_t>(PT::kPlayerConnected), pc);
+
+            sfs::protocol::UpdatePlayerControlPacket ctl;
+            ctl.player_id = pid;
+            auto cit = controlled_rocket_.find(pid);
+            ctl.rocket_id = (cit != controlled_rocket_.end()) ? cit->second : -1;
+            send_packet(fd, static_cast<std::uint8_t>(PT::kUpdatePlayerControl), ctl);
+        }
+
+        // ② 世界快照（逐枚 CreateRocket）
+        send_world_snapshot(fd);
+
+        // ③ 时间倍率（客户端靠它初始化 time scale，缺了会导致时间行为异常）
+        sfs::protocol::TimeWarpPacket tw;
+        tw.operation = sfs::protocol::TimeWarpOperation::kApplied;
+        tw.multiplier = time_scale_;
+        tw.world_time = world_time();
+        send_packet(fd, static_cast<std::uint8_t>(PT::kTimeWarp), tw);
+
+        // ④ 广播自己加入给其他人（PrintMessage=true 让其他人看到"已进入世界"）
+        {
+            sfs::protocol::PlayerConnectedPacket joined;
+            joined.player_id = joining_id;
+            joined.username = joining_name;
+            auto pit = players_.find(joining_id);
+            joined.icon_color = (pit != players_.end()) ? pit->second.color : sfs::protocol::Color3::default_color();
+            joined.print_message = true;
+            broadcast_packet(static_cast<std::uint8_t>(PT::kPlayerConnected), joined, fd);
+        }
+
+        // ⑤ 广播进入世界提示给其他人（屏幕文案必须英文，中文会显示方框）
+        {
+            sfs::protocol::PlayerEventToastPacket toast;
+            toast.message = joining_name + " entered the world";
+            broadcast_packet(static_cast<std::uint8_t>(PT::kShowToastMessage), toast, fd);
+        }
+    }
+
+    // ---------------------------------------------------------- 存档
+    void load_world_from_disk() {
+        if (state_path_.empty()) return;
+        std::string err;
+        const auto saved = sfs::store::load_state(state_path_, &err);
+        if (!saved.has_value()) {
+            std::printf("[cpp-server] 存档未加载: %s\n", err.c_str());
+            std::fflush(stdout);
+            return;
+        }
+        // 关键：世界时间必须接上存档的值。
+        // 从 0 重新计时会让客户端时间倒退约 100 万秒，物理状态与时间失配导致卡死。
+        world_time_base_ = saved->world_time;
+        world_clock_origin_ = std::chrono::steady_clock::now();
+        rockets_.clear();
+        std::size_t part_count = 0;
+        for (const auto& [rid, r] : saved->rockets) {
+            RocketEntry e;
+            e.state = r;
+            e.owner_player = -1;
+            part_count += r.parts.size();
+            rockets_.emplace(rid, std::move(e));
+        }
+        std::printf("[cpp-server] 存档已加载: 世界时间=%.3f 火箭=%zu 部件=%zu\n",
+                    world_time_base_, rockets_.size(), part_count);
+        std::fflush(stdout);
+    }
+
+    void save_world_to_disk() {
+        if (state_path_.empty()) return;
+        sfs::store::SavedWorld out;
+        out.world_time = world_time();
+        out.difficulty = 0;
+        for (const auto& [rid, e] : rockets_) out.rockets.emplace(rid, e.state);
+        std::string err;
+        if (!sfs::store::save_state(state_path_, out, &err)) {
+            std::printf("[cpp-server] 存档失败: %s\n", err.c_str());
+            std::fflush(stdout);
+        }
+    }
+    // 世界时间 = 基准 + 自基准点起的单调秒数 × 倍率（对齐 C# WorldTime 属性）
+    double world_time_base_ = 0.0;
+    double time_scale_ = 1.0;
+    std::chrono::steady_clock::time_point world_clock_origin_ = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point last_heartbeat_ = std::chrono::steady_clock::now();
+
+    double world_time() const {
+        return world_time_base_ + steady_seconds_since(world_clock_origin_) * time_scale_;
+    }
+    // 玩家信息表（对齐 C# TcpSession：Username / Color / UdpToken / ResumeToken）
+    // 断线重连必须保持身份不变 —— 客户端凭 resume_token 认回原会话；若每次都给新
+    // player_id/token，客户端会判定重连失败并无限重连，而每次重连又收一遍完整世界
+    // 快照，导致它反复销毁重建全部火箭，最终在 Unity 侧崩溃。
+    struct PlayerInfo {
+        std::string name;
+        sfs::protocol::Color3 color = sfs::protocol::Color3::default_color();
+        std::string udp_token;
+        std::string resume_token;
+        std::int32_t controlled_rocket = -1;
+
+        bool can_resume(const std::string& token) const {
+            return !resume_token.empty() && resume_token == token;
+        }
+    };
+    std::unordered_map<std::int32_t, PlayerInfo> players_;
+
+    // 对齐 C# RandomColor()：HSV(h, 1, 1) → RGB
+    sfs::protocol::Color3 random_color() {
+        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        const float h = dist(rng_);
+        const int i = static_cast<int>(h * 6.0f);
+        const float f = h * 6.0f - static_cast<float>(i);
+        const float p = 0.0f;                    // v*(1-s)，s=1
+        const float q = 1.0f - f;                // v*(1-f*s)
+        const float t = f;                       // v*(1-(1-f)*s)
+
+        sfs::protocol::Color3 c;
+        switch (i % 6) {
+            case 0: c.r = 1.0f; c.g = t;    c.b = p;    break;
+            case 1: c.r = q;    c.g = 1.0f; c.b = p;    break;
+            case 2: c.r = p;    c.g = 1.0f; c.b = t;    break;
+            case 3: c.r = p;    c.g = q;    c.b = 1.0f; break;
+            case 4: c.r = t;    c.g = p;    c.b = 1.0f; break;
+            default: c.r = 1.0f; c.g = p;   c.b = q;    break;
+        }
+        return c;
+    }
+
+    // player_id -> 该玩家声明控制的火箭（对应 C# TcpSession.ControlledRocket）
+    std::unordered_map<std::int32_t, std::int32_t> controlled_rocket_;
+    // player_id -> 该玩家的权威火箭集合（对应 C# TcpSession.UpdateAuthority）
+    std::unordered_map<std::int32_t, std::unordered_set<std::int32_t>> update_authority_;
+
+    // ---------------------------------------------------------- 底层发送
+    void send_payload(int fd, std::uint8_t packet_type, const sfs::net::NetWriter& body) {
+        sfs::net::NetWriter w;
+        w.write_u8(packet_type);
+        if (body.get_bit_length() > 0) {
+            w.write_bytes(body.data(), body.get_bytes().size());
+        }
+        auto data = w.get_bytes();
+        send_frame(fd, TcpFrame{TcpFrameKind::Packet, next_seq(fd), data,
+                                static_cast<std::int32_t>(w.get_bit_length())});
+    }
+
+    template <typename PktT>
+    void send_packet(int fd, std::uint8_t packet_type, const PktT& pkt) {
+        sfs::net::NetWriter body;
+        pkt.serialize(body);
+        send_payload(fd, packet_type, body);
+    }
+
+    template <typename PktT>
+    void broadcast_packet(std::uint8_t packet_type, const PktT& pkt, int exclude_fd) {
+        sfs::net::NetWriter body;
+        pkt.serialize(body);
+        for (auto& [fd, c] : conns_) {
+            if (fd == exclude_fd || !c.handshaked) continue;
+            send_payload(fd, packet_type, body);
+        }
+    }
+
+    // ---------------------------------------------------------- UDP 下发
+    void send_udp_datagram(const std::string& addr, std::uint16_t port,
+                           const std::vector<std::uint8_t>& data) {
+        sockaddr_in dest{};
+        dest.sin_family = AF_INET;
+        dest.sin_port = htons(port);
+        inet_pton(AF_INET, addr.c_str(), &dest.sin_addr);
+        ::sendto(udp_fd_, data.data(), data.size(), MSG_NOSIGNAL,
+                 reinterpret_cast<sockaddr*>(&dest), sizeof(dest));
+    }
+
+    // UpdateRocketPrimary 是唯一走 UDP 状态通道的包（对齐 C# BroadcastLatest）：
+    // 接收方已建 UDP 通道则直发 UDP，否则退回 TCP。
+    void broadcast_rocket_primary(const sfs::protocol::UpdateRocketPrimaryPacket& pkt, int exclude_fd) {
+        using PT = sfs::protocol::PacketType;
+        sfs::net::NetWriter w;
+        w.write_u8(static_cast<std::uint8_t>(PT::kUpdateRocketPrimary));
+        pkt.serialize(w);
+        const auto data = w.get_bytes();
+        const auto bits = static_cast<std::int32_t>(w.get_bit_length());
+
+        for (auto& [cfd, c] : conns_) {
+            if (cfd == exclude_fd || !c.handshaked) continue;
+            if (!c.udp_addr.empty() && c.udp_port != 0) {
+                const auto env = sfs::protocol::EncodeUdpEnvelope(
+                    sfs::protocol::UdpKind::Data, c.udp_token, data);
+                send_udp_datagram(c.udp_addr, c.udp_port, env);
+            } else {
+                send_frame(cfd, TcpFrame{TcpFrameKind::Packet, c.next_seq++, data, bits});
+            }
+        }
+    }
+
+    // ---------------------------------------------------------- 权威分配
+    // 对应 C# AuthorityAllocationPolicy.Allocate：
+    //   玩家声明控制某火箭则归其所有，否则按 player_id 排序轮询分配。
+    void refresh_authorities() {
+        update_authority_.clear();
+
+        // 参与者 = 当前已握手的连接，按 player_id 升序（对齐 C# 的 OrderBy(PlayerId)）
+        std::vector<std::int32_t> participants;
+        for (const auto& [fd, c] : conns_) {
+            if (c.handshaked && c.player_id >= 0) participants.push_back(c.player_id);
+        }
+        std::sort(participants.begin(), participants.end());
+
+        if (participants.empty()) return;
+        for (auto pid : participants) update_authority_[pid] = {};
+
+        // 火箭按 id 升序
+        std::vector<std::int32_t> rocket_ids;
+        rocket_ids.reserve(rockets_.size());
+        for (const auto& [rid, _] : rockets_) rocket_ids.push_back(rid);
+        std::sort(rocket_ids.begin(), rocket_ids.end());
+
+        std::size_t round_robin = 0;
+        for (auto rid : rocket_ids) {
+            std::int32_t owner = -1;
+            for (auto pid : participants) {
+                auto cit = controlled_rocket_.find(pid);
+                if (cit != controlled_rocket_.end() && cit->second == rid) { owner = pid; break; }
+            }
+            if (owner < 0) owner = participants[round_robin++ % participants.size()];
+            update_authority_[owner].insert(rid);
+        }
+
+        // 发给每个玩家
+        for (auto& [fd, c] : conns_) {
+            if (!c.handshaked || c.player_id < 0) continue;
+            sfs::protocol::UpdatePlayerAuthorityPacket pkt;
+            auto ait = update_authority_.find(c.player_id);
+            if (ait != update_authority_.end())
+                pkt.rocket_ids.assign(ait->second.begin(), ait->second.end());
+            send_packet(fd, static_cast<std::uint8_t>(sfs::protocol::PacketType::kUpdatePlayerAuthority), pkt);
+        }
+    }
+
+    // ---------------------------------------------------------- 世界快照
+    // 对应 C# SendWorldSnapshot：逐枚火箭发 CreateRocket（GlobalId=火箭ID，LocalId 默认 0）
+    void send_world_snapshot(int fd) {
+        std::vector<std::int32_t> ids;
+        ids.reserve(rockets_.size());
+        for (const auto& [rid, _] : rockets_) ids.push_back(rid);
+        std::sort(ids.begin(), ids.end());
+
+        for (auto rid : ids) {
+            auto it = rockets_.find(rid);
+            if (it == rockets_.end()) continue;
+            sfs::protocol::CreateRocketPacket pkt;
+            pkt.world_time = world_time();
+            pkt.local_id = 0;
+            pkt.global_id = rid;
+            pkt.for_launch = false;
+            pkt.rocket = it->second.state;
+            send_packet(fd, static_cast<std::uint8_t>(sfs::protocol::PacketType::kCreateRocket), pkt);
+        }
+    }
+
+    // ---------------------------------------------------------- 业务包处理
+    void handle_packet(int fd, const std::vector<std::uint8_t>& payload, std::int32_t payload_bits) {
+        if (payload.empty()) return;
+        sfs::net::NetReader r(payload.data(), static_cast<std::size_t>(payload_bits));
+        if (r.at_end()) return;
+
+        const std::uint8_t raw_type = r.read_u8();
+        const auto packet_type = static_cast<sfs::protocol::PacketType>(raw_type);
+        using PT = sfs::protocol::PacketType;
+
+        auto it = conns_.find(fd);
+        if (it == conns_.end()) return;
+        const std::int32_t player_id = it->second.player_id;
+
+        // 权限判定：只有拥有权威的玩家能改这枚火箭
+        auto has_authority = [this, player_id](std::int32_t rid) {
+            auto ait = update_authority_.find(player_id);
+            return ait != update_authority_.end() && ait->second.count(rid) > 0;
+        };
+
+        switch (packet_type) {
+            case PT::kCreateRocket: {
+                // 客户端造了一枚火箭：服务端分配全局 ID → 先回执给创建者 → 再广播给其他人
+                sfs::protocol::CreateRocketPacket pkt;
+                pkt.deserialize(r);
+
+                // 已存在的火箭视为整枚状态覆盖
+                if (pkt.global_id >= 0 && rockets_.count(pkt.global_id)) {
+                    if (!has_authority(pkt.global_id)) return;
+                    rockets_[pkt.global_id].state = pkt.rocket;
+                    pkt.world_time = world_time();
+                    pkt.local_id = -1;
+                    broadcast_packet(static_cast<std::uint8_t>(PT::kCreateRocket), pkt, fd);
+                    return;
+                }
+
+                const std::int32_t new_id = next_rocket_id();
+                pkt.global_id = new_id;
+                pkt.world_time = world_time();
+                RocketEntry entry;
+                entry.state = pkt.rocket;
+                entry.owner_player = player_id;
+                rockets_.emplace(new_id, std::move(entry));
+
+                // ① 回执给创建者：LocalId 必须保留原值，客户端靠它把本地临时火箭绑到 GlobalId
+                //    （写成 -1 会让 unsyncedRockets 永远清不掉，表现为"卡在创建火箭"）
+                send_packet(fd, static_cast<std::uint8_t>(PT::kCreateRocket), pkt);
+                std::printf("[cpp-server] rocket created: global_id=%d owner=%d parts=%zu\n",
+                            new_id, player_id, rockets_[new_id].state.parts.size());
+                std::fflush(stdout);
+
+                // ② 广播给其他人：LocalId 清成 -1，避免各方临时编号碰撞造成错绑
+                pkt.local_id = -1;
+                broadcast_packet(static_cast<std::uint8_t>(PT::kCreateRocket), pkt, fd);
+
+                if (!pkt.for_launch) refresh_authorities();
+                break;
+            }
+            case PT::kDestroyRocket: {
+                sfs::protocol::DestroyRocketPacket pkt;
+                pkt.deserialize(r);
+                if (!has_authority(pkt.rocket_id)) return;
+                if (!rockets_.erase(pkt.rocket_id)) return;
+                pkt.world_time = world_time();
+
+                // 若有人正控制这枚火箭，先广播一条控制权释放
+                for (auto& [pid, rid] : controlled_rocket_) {
+                    if (rid == pkt.rocket_id) {
+                        rid = -1;
+                        sfs::protocol::UpdatePlayerControlPacket ctl;
+                        ctl.player_id = pid;
+                        ctl.rocket_id = -1;
+                        broadcast_packet(static_cast<std::uint8_t>(PT::kUpdatePlayerControl), ctl, -1);
+                    }
+                }
+                broadcast_packet(static_cast<std::uint8_t>(PT::kDestroyRocket), pkt, -1);
+                std::printf("[cpp-server] rocket destroyed: id=%d by player %d\n",
+                            pkt.rocket_id, player_id);
+                std::fflush(stdout);
+                refresh_authorities();
+                break;
+            }
+            case PT::kUpdateRocketPrimary: {
+                sfs::protocol::UpdateRocketPrimaryPacket pkt;
+                pkt.deserialize(r);
+                auto rit = rockets_.find(pkt.rocket_id);
+                if (rit == rockets_.end()) return;
+                if (!has_authority(pkt.rocket_id)) return;
+                rit->second.state.location = pkt.location;
+                rit->second.state.rotation = pkt.rotation;
+                rit->second.state.angular_velocity = pkt.angular_velocity;
+                broadcast_rocket_primary(pkt, fd);
+                break;
+            }
+            case PT::kUpdateRocketSecondary: {
+                sfs::protocol::UpdateRocketSecondaryPacket pkt;
+                pkt.deserialize(r);
+                auto rit = rockets_.find(pkt.rocket_id);
+                if (rit == rockets_.end()) return;
+                if (!has_authority(pkt.rocket_id)) return;
+                rit->second.state.throttle_on = pkt.throttle_on;
+                rit->second.state.throttle_percent = pkt.throttle_percent;
+                rit->second.state.rcs = pkt.rcs;
+                broadcast_packet(static_cast<std::uint8_t>(PT::kUpdateRocketSecondary), pkt, fd);
+                break;
+            }
+            case PT::kDestroyPart: {
+                sfs::protocol::DestroyPartPacket pkt;
+                pkt.deserialize(r);
+                auto rit = rockets_.find(pkt.rocket_id);
+                if (rit == rockets_.end()) return;
+                if (!has_authority(pkt.rocket_id)) return;
+                {
+                    auto& parts = rit->second.state.parts;
+                    parts.erase(std::remove_if(parts.begin(), parts.end(),
+                        [&pkt](const std::pair<std::int32_t, sfs::protocol::PartState>& p) {
+                            return p.first == pkt.part_id; }),
+                        parts.end());
+                }
+                rit->second.state.joints.erase(
+                    std::remove_if(rit->second.state.joints.begin(), rit->second.state.joints.end(),
+                        [&pkt](const sfs::protocol::JointState& j) {
+                            return j.part_a == pkt.part_id || j.part_b == pkt.part_id;
+                        }),
+                    rit->second.state.joints.end());
+                for (auto& st : rit->second.state.stages) {
+                    st.part_ids.erase(
+                        std::remove(st.part_ids.begin(), st.part_ids.end(), pkt.part_id),
+                        st.part_ids.end());
+                }
+                broadcast_packet(static_cast<std::uint8_t>(PT::kDestroyPart), pkt, -1);
+                break;
+            }
+            case PT::kUpdateStaging: {
+                sfs::protocol::UpdateStagingPacket pkt;
+                pkt.deserialize(r);
+                auto rit = rockets_.find(pkt.rocket_id);
+                if (rit == rockets_.end()) return;
+                if (!has_authority(pkt.rocket_id)) return;
+                rit->second.state.stages = pkt.stages;
+                broadcast_packet(static_cast<std::uint8_t>(PT::kUpdateStaging), pkt, fd);
+                break;
+            }
+            case PT::kUpdatePartEngineModule:
+            case PT::kUpdatePartWheelModule: {
+                // 两种模块包字段布局相同（WorldTime, RocketId, PartId, bool），按字节转发
+                if (payload.size() < 13) return;
+                std::int32_t rid = 0;
+                std::memcpy(&rid, payload.data() + 9, 4);
+                if (!has_authority(rid)) return;
+                sfs::net::NetWriter w;
+                w.write_bytes(payload.data() + 1, payload.size() - 1);
+                for (auto& [cfd, c] : conns_) {
+                    if (cfd == fd || !c.handshaked) continue;
+                    send_payload(cfd, raw_type, w);
+                }
+                break;
+            }
+            case PT::kUpdatePartBoosterModule:
+            case PT::kUpdatePartParachuteModule:
+            case PT::kUpdatePartMoveModule:
+            case PT::kUpdatePartResourceModule: {
+                // 这几种包统一按 WorldTime(f64) + RocketId(i32) 前缀，按字节转发
+                if (payload.size() < 13) return;
+                std::int32_t rid = 0;
+                std::memcpy(&rid, payload.data() + 9, 4);
+                if (!has_authority(rid)) return;
+                sfs::net::NetWriter w;
+                w.write_bytes(payload.data() + 1, payload.size() - 1);
+                for (auto& [cfd, c] : conns_) {
+                    if (cfd == fd || !c.handshaked) continue;
+                    send_payload(cfd, raw_type, w);
+                }
+                break;
+            }
+            case PT::kUpdatePlayerControl: {
+                sfs::protocol::UpdatePlayerControlPacket pkt;
+                pkt.deserialize(r);
+                // 只允许改自己的控制目标
+                if (pkt.player_id != player_id) return;
+                auto rit = rockets_.find(pkt.rocket_id);
+                if (pkt.rocket_id >= 0 && rit == rockets_.end()) return;
+                controlled_rocket_[player_id] = pkt.rocket_id;
+                broadcast_packet(static_cast<std::uint8_t>(PT::kUpdatePlayerControl), pkt, -1);
+                std::printf("[cpp-server] player %d controls rocket %d\n",
+                            player_id, pkt.rocket_id);
+                std::fflush(stdout);
+                refresh_authorities();
+                break;
+            }
+            case PT::kUpdatePlayerColor: {
+                sfs::protocol::UpdatePlayerColorPacket pkt;
+                pkt.deserialize(r);
+                if (pkt.player_id != player_id) return;
+                broadcast_packet(static_cast<std::uint8_t>(PT::kUpdatePlayerColor), pkt, -1);
+                break;
+            }
+            case PT::kSendChatMessage: {
+                sfs::protocol::SendChatMessagePacket pkt;
+                pkt.deserialize(r);
+                pkt.sender_id = player_id;   // 以服务端记录的 ID 为准，不信客户端自称
+                broadcast_packet(static_cast<std::uint8_t>(PT::kSendChatMessage), pkt, -1);
+                std::printf("[cpp-server] chat from %d: %s\n", player_id, pkt.message.c_str());
+                std::fflush(stdout);
+                break;
+            }
+            case PT::kUpdateWorldTime: {
+                // 世界时间只由服务端驱动（收到 Pong 后下发）。客户端不会发这个包，忽略即可。
+                break;
+            }
+            case PT::kTimeWarp: {
+                sfs::protocol::TimeWarpPacket pkt;
+                pkt.deserialize(r);
+                broadcast_packet(static_cast<std::uint8_t>(PT::kTimeWarp), pkt, fd);
+                break;
+            }
+            case PT::kDockTransaction: {
+                sfs::protocol::DockTransactionPacket pkt;
+                pkt.deserialize(r);
+                if (pkt.committed && pkt.merged_rocket.has_value()) {
+                    auto rit = rockets_.find(pkt.keep_rocket_id);
+                    if (rit != rockets_.end()) rit->second.state = *pkt.merged_rocket;
+                    rockets_.erase(pkt.remove_rocket_id);
+                }
+                broadcast_packet(static_cast<std::uint8_t>(PT::kDockTransaction), pkt, fd);
+                refresh_authorities();
+                break;
+            }
+            case PT::kP2PPeerOffer: {
+                sfs::protocol::P2PPeerOfferPacket pkt;
+                pkt.deserialize(r);
+                // P2P 信令：转发给目标玩家
+                for (auto& [cfd, c] : conns_) {
+                    if (!c.handshaked || c.player_id != pkt.peer_player_id) continue;
+                    send_packet(cfd, static_cast<std::uint8_t>(PT::kP2PPeerOffer), pkt);
+                    break;
+                }
+                break;
+            }
+            case PT::kExperimentalAccess:
+                // 实验性访问暂不开放
+                break;
+            default:
+                ++unknown_frames_;
+                break;
+        }
+    }
+
+    std::uint16_t port_;
+    std::int32_t max_players_;
+    int epoll_fd_ = -1;
+    int listen_fd_ = -1;
+    int udp_fd_ = -1;
+    std::uint64_t next_conn_id_ = 0;
+    std::int32_t next_player_id_ = 0;
+    std::int32_t player_count_ = 0;
+    std::unordered_map<int, Connection> conns_;
+    std::unordered_map<std::string, int> token_to_fd_;
+    std::uint64_t packet_count_ = 0;
+    std::uint64_t bad_packets_ = 0;
+    std::vector<int> pending_disconnects_;
+    std::unordered_set<int> connected_fds_;   // 已计入 player_count_ 的连接
+    std::uint64_t snapshot_requests_ = 0;
+    std::uint64_t unknown_frames_ = 0;
+    std::uint64_t udp_datagrams_ = 0;
+    std::uint64_t udp_data_ = 0;
+    std::uint64_t udp_binds_ = 0;
+    std::uint64_t udp_bad_ = 0;
+    std::uint8_t last_packet_type_ = 0xFF;
+};
+
+}  // namespace
+
+int main(int argc, char* argv[]) {
+    std::uint16_t port = 9806;
+    std::int32_t max_players = kMaxPlayers;
+    // 默认与 C# 版一致：相对当前工作目录的 data/server-state.json
+    std::string state_path = "data/server-state.json";
+
+    // 兼容两种用法：位置参数（端口 人数）+ 具名参数
+    int positional = 0;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        auto need_value = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) {
+                std::printf("[cpp-server] %s 缺少参数值\n", name);
+                std::exit(2);
+            }
+            return argv[++i];
+        };
+        if (arg == "--state")       { state_path = need_value("--state"); continue; }
+        if (arg == "--port")        { port = static_cast<std::uint16_t>(std::atoi(need_value("--port"))); continue; }
+        if (arg == "--max-players") { max_players = std::atoi(need_value("--max-players")); continue; }
+        if (arg == "--help" || arg == "-h") {
+            std::printf("用法: %s [端口] [人数上限] [--state <存档路径>] [--port N] [--max-players N]\n",
+                        argv[0]);
+            return 0;
+        }
+        // 位置参数：第 1 个是端口，第 2 个是人数
+        ++positional;
+        if (positional == 1) port = static_cast<std::uint16_t>(std::atoi(arg.c_str()));
+        else if (positional == 2) max_players = std::atoi(arg.c_str());
+    }
+
+    signal(SIGINT, on_signal);
+    signal(SIGTERM, on_signal);
+    signal(SIGPIPE, SIG_IGN);
+
+    std::printf("[cpp-server] SFS Multiplayer C++ server\n");
+    std::printf("[cpp-server] protocol version = %d, state=%s\n",
+                kProtocolVersion, state_path.c_str());
+    std::fflush(stdout);
+
+    Server server(port, max_players, state_path);
+    if (!server.start()) {
+        std::printf("[cpp-server] start failed\n");
+        return 1;
+    }
+    server.run();
+
+    // 退出前落盘，避免丢进度
+    server.save_world_to_disk();
+    std::printf("[cpp-server] stopped (state saved)\n");
+    return 0;
+}

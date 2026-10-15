@@ -1,0 +1,13 @@
+{
+  "WorldPath": "",
+  "StatePath": "data/server-state.json",
+  "AutoSaveSeconds": 30,
+  "Port": 9806,
+  "Password": "",
+  "MaxConnections": 16,
+  "BlockDuplicatePlayerNames": true,
+  "UpdateRocketsPeriod": 20,
+  "ChatMessageCooldown": 3,
+  "MaxUsernameLength": 32,
+  "MaxChatMessageLength": 512
+}

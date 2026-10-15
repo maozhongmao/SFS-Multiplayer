@@ -24,6 +24,11 @@ public static class P2PConnectionManager
     public static string Status { get; private set; } = "Relay Fallback";
     public static int ActivePeerCount { get; private set; }
 
+    // 【诊断分细】以前 F8 只有一句 "Relay Fallback"，四种失败原因（服务器撤销 / 握手超时 /
+    // 过渡窗口到期 / 链路丢失）全挤成同一句话，分不清卡在哪一步。这里把被拒/被撤销的原因也留下。
+    public static string LastOfferRejectInfo { get; private set; } = string.Empty;
+    public static string LastRevokedInfo { get; private set; } = string.Empty;
+
     public static void ApplyOffer(Packet_P2PPeerOffer offer)
     {
         if (offer == null || offer.PeerPlayerId < 0) return;
@@ -31,18 +36,59 @@ public static class P2PConnectionManager
         {
             if (peers.TryGetValue(offer.PeerPlayerId, out var oldPeer))
             {
+                LastRevokedInfo = "peer " + offer.PeerPlayerId + " revoked by server";
                 oldPeer.Dispose();
+            }
+            else
+            {
+                LastRevokedInfo = "revoke for unknown peer " + offer.PeerPlayerId;
             }
             peers.Remove(offer.PeerPlayerId);
             RefreshStatus();
             return;
         }
         if (!IPAddress.TryParse(offer.PeerAddress, out var address) || offer.PeerPort < 1 || offer.PeerPort > 65535 ||
-            string.IsNullOrEmpty(offer.PairToken)) return;
+            string.IsNullOrEmpty(offer.PairToken))
+        {
+            // 以前这里静默 return：服务器给的地址解析不了（比如发来的是域名而不是 IP）时，
+            // 面板上只会永远显示 "Relay Fallback"，完全看不出是被这里丢掉的。
+            LastOfferRejectInfo = "offer rejected: address=\"" + offer.PeerAddress + "\" port=" + offer.PeerPort
+                + " token=" + (string.IsNullOrEmpty(offer.PairToken) ? "empty" : "present");
+            DebugTrace.Note(LastOfferRejectInfo);
+            return;
+        }
 
         var endpoint = new IPEndPoint(address, offer.PeerPort);
-        if (!peers.TryGetValue(offer.PeerPlayerId, out var peer) ||
-            !string.Equals(peer.Token, offer.PairToken, StringComparison.Ordinal) || !peer.Endpoint.Equals(endpoint))
+        bool known = peers.TryGetValue(offer.PeerPlayerId, out var peer);
+        bool sameToken = known && string.Equals(peer.Token, offer.PairToken, StringComparison.Ordinal);
+        if (known && !sameToken)
+        {
+            // 新 token = 新配对周期：旧的 socket 作废（这是唯一该重建的情况）
+            DebugTrace.Note("peer " + offer.PeerPlayerId + " new pair token -> socket rebuilt");
+            peer.Dispose();
+            known = false;
+        }
+
+        // 【死循环修复 2026-10-10】以前只要"对方端点变了"就整只重建 —— 而我们自己重建会换端口，
+        // 对方看到又要重建，服务端再重发报价……双方每毫秒换一次门牌，一个探测都来不及交换。
+        // 现在：对方端口变了**只改目标**，本端 socket 不动。
+        if (known && !peer.Endpoint.Equals(endpoint))
+        {
+            DebugTrace.Note("peer " + offer.PeerPlayerId + " retarget " + peer.Endpoint + " -> " + endpoint);
+            peer.Retarget(endpoint);
+        }
+
+        // 重绑只发生在"已经 Fallback 且距上次绑定够久"的时候 —— 这才是真正的动态调整（有冷却，不会抖）。
+        bool rebindForRetry = known && peer.Fallback
+            && (DateTime.UtcNow - peer.CreatedUtc).TotalSeconds >= 8.0;
+        if (rebindForRetry)
+        {
+            DebugTrace.Note("peer " + offer.PeerPlayerId + " retry: rebinding local socket after fallback");
+            peer.Dispose();
+            known = false;
+        }
+
+        if (!known)
         {
             peer = new Peer(offer.PeerPlayerId, endpoint, offer.PairToken, Math.Max(0, offer.TransitionBufferSeconds));
             peers[offer.PeerPlayerId] = peer;
@@ -50,17 +96,45 @@ public static class P2PConnectionManager
                 peer.Username = lp.username;
             Status = "P2P Connecting";
             ToastHelper.ShowToast(Status);
+            DebugTrace.Note("offer peer=" + offer.PeerPlayerId + " ep=" + endpoint + " transition=" + offer.TransitionBufferSeconds + "s");
         }
         peer.LocalRocketIds = new HashSet<int>(offer.LocalRocketIds ?? new List<int>());
         peer.PeerRocketIds = new HashSet<int>(offer.PeerRocketIds ?? new List<int>());
     }
 
-    // 玩家火箭严格只走 TCP 中继单源（服务器盖章 WorldTime），P2P 不再发送任何玩家火箭 primary，
-    // 避免同一枚火箭在接收端同时收到 TCP 包与 P2P 包、两个时间戳轴不完全对齐导致位置来回飘移（双源冲突）。
-    // P2P 握手机制保留，待未来有非玩家邻近物体（本地 world 没有、对方世界有）时才用于直传显示体。
+    // 【P2P 承载数据 2026-10-10】原先这里恒 return false，接收侧也明文丢弃玩家火箭，
+    // 两头焊死 -> P2P 完全空转（只握手不传数据）。
+    // 现在：只把"配对时服务端点名的那些火箭"（LocalRocketIds）发给该 peer。
+    // 双源冲突不再靠"禁用 P2P"解决，而靠接收侧按【来源】仲裁（见 ApplyState / HasFreshState）：
+    // 中继那份的时间戳是服务端重盖的，和发送方时钟不是同一条轴，比时间戳必然来回翻。
     public static bool SendRocketState(Packet_UpdateRocketPrimary packet)
     {
-        return false;
+        if (packet == null || peers.Count == 0) return false;
+        bool sent = false;
+        foreach (Peer peer in peers.Values)
+        {
+            if (!peer.Active || !peer.KcpInitialized || peer.KcpContext == null) continue;
+            if (peer.LocalRocketIds == null || !peer.LocalRocketIds.Contains(packet.RocketId)) continue;
+            try
+            {
+                NetPayload payload = NetPayloadCodec.Serialize(packet, includePacketType: false);
+                // 帧内布局必须与接收侧 ApplyState 一致：[seq(4)][payloadCount(4)][bits(4)][payload...]
+                byte[] blob = new byte[12 + payload.Data.Length];
+                System.BitConverter.GetBytes(0).CopyTo(blob, 0);
+                System.BitConverter.GetBytes(1).CopyTo(blob, 4);
+                System.BitConverter.GetBytes(payload.BitLength).CopyTo(blob, 8);
+                System.Buffer.BlockCopy(payload.Data, 0, blob, 12, payload.Data.Length);
+                TcpFrame frame = new TcpFrame(TcpFrameKind.Packet, ++peer.NextStateSequence, blob, blob.Length * 8);
+                peer.KcpContext.Send(TcpFrameCodec.Encode(frame));
+                DebugTrace.Frame("p2p-out-state", 0, blob.Length);
+                sent = true;
+            }
+            catch
+            {
+                // 单个 peer 发失败不影响其它 peer，也不该打断主循环
+            }
+        }
+        return sent;
     }
 
     public static void Clear()
@@ -70,6 +144,7 @@ public static class P2PConnectionManager
             peer.Dispose();
         }
         peers.Clear();
+        p2pStateLastSeen.Clear();
         ActivePeerCount = 0;
         Status = "Relay Fallback";
     }
@@ -127,15 +202,23 @@ public static class P2PConnectionManager
             {
                 peer.Active = false;
                 peer.Fallback = true;
+                peer.FallbackReason = "link lost: no packet for 3s";
+                DebugTrace.Note("peer " + peer.PlayerId + " fallback: " + peer.FallbackReason);
             }
 
             // 握手超时：10 秒仍未 Active 则标记 Fallback
             if (!peer.Active && !peer.Fallback && now >= peer.HandshakeDeadlineUtc)
             {
                 peer.Fallback = true;
+                peer.FallbackReason = "handshake timeout: " + peer.ValidHandshakePackets + "/3 valid hellos in 10s";
+                DebugTrace.Note("peer " + peer.PlayerId + " fallback: " + peer.FallbackReason + " probes=" + peer.ProbesSent + " rx=" + peer.PacketsReceived);
             }
-            if (!peer.Active && now - peer.CreatedUtc >= TimeSpan.FromSeconds(peer.TransitionBufferSeconds))
+            if (!peer.Active && !peer.Fallback && now - peer.CreatedUtc >= TimeSpan.FromSeconds(peer.TransitionBufferSeconds))
+            {
                 peer.Fallback = true;
+                peer.FallbackReason = "transition window expired: " + peer.TransitionBufferSeconds + "s";
+                DebugTrace.Note("peer " + peer.PlayerId + " fallback: " + peer.FallbackReason + " hs=" + peer.ValidHandshakePackets + "/3");
+            }
 
             if (P2PPostConnectSyncPolicy.ShouldRequestServerSync(
                     peer.Active, peer.ServerSyncRequested, peer.ActiveSinceUtc, now))
@@ -190,6 +273,20 @@ public static class P2PConnectionManager
             return;
         }
 
+        // 【超级调试】P2P 通道帧级追踪（P2P 不走主传输，主传输的钩子看不到它）
+        DebugTrace.Frame("p2p-in-" + frame.Kind, 0, length);
+        // 【诊断分细】按帧类型 + 业务包类型分类计数（以前只留"最后一个包"，看不出构成）
+        peer.PacketsReceived++;
+        peer.BytesReceived += length;
+        CountInto(peer.FrameKindCounts, frame.Kind.ToString());
+        if (frame.Kind == TcpFrameKind.Packet && frame.Payload != null && frame.Payload.Length > 0)
+        {
+            // 【收尾 2026-10-13】P2P 帧 payload 的前 4 字节是【内层 seq】（恒为 0），
+            // 以前把它当业务类型 -> 所有状态帧都被统计成 JoinRequest(type=0)，
+            // 看起来就像"P2P 只握手不传数据"。P2P 通道只承载 UpdateRocketPrimary，按事实记。
+            CountInto(peer.PacketTypeCounts, "UpdateRocketPrimary");
+        }
+
         if (frame.Kind == TcpFrameKind.Hello)
         {
             peer.ValidHandshakePackets++;
@@ -198,6 +295,7 @@ public static class P2PConnectionManager
             {
                 peer.Active = true;
                 peer.ActiveSinceUtc = DateTime.UtcNow;
+                DebugTrace.Note("peer " + peer.PlayerId + " ACTIVE rtt=" + peer.RttMs.ToString("F0") + "ms");
             }
         }
         else if (frame.Kind == TcpFrameKind.HelloAck)
@@ -208,6 +306,7 @@ public static class P2PConnectionManager
             {
                 peer.Active = true;
                 peer.ActiveSinceUtc = DateTime.UtcNow;
+                DebugTrace.Note("peer " + peer.PlayerId + " ACTIVE rtt=" + peer.RttMs.ToString("F0") + "ms");
             }
         }
         else if (frame.Kind == TcpFrameKind.Packet)
@@ -223,6 +322,8 @@ public static class P2PConnectionManager
         var probeFrame = new TcpFrame(TcpFrameKind.Hello, ++peer.NextStateSequence,
             payload, payload.Length * 8);
         peer.LastPingSentTicks = DateTime.UtcNow.Ticks;
+        if (peer.ProbesSent == 0) DebugTrace.Note("peer " + peer.PlayerId + " first probe -> " + peer.Endpoint);
+        peer.ProbesSent++;
         peer.KcpContext.Send(TcpFrameCodec.Encode(probeFrame));
     }
 
@@ -277,14 +378,26 @@ public static class P2PConnectionManager
             {
                 var packet = new Packet_UpdateRocketPrimary();
                 packet.Deserialize(NetPayloadCodec.ToIncoming(payload, payloadBits));
-                // 关键守卫：玩家火箭（已在 world.rockets 中、由 TCP 中继单源同步）一律跳过 P2P，
-                // 只处理本地 world 里不存在的未知物体（未来非玩家邻近物体的显示体）。
-                // 这样玩家火箭在接收端只有 TCP 一个时间戳源，杜绝双源飘移。
-                if (ClientManager.world != null && ClientManager.world.rockets.ContainsKey(packet.RocketId))
+                // 【按来源仲裁 2026-10-10】这里原来是"玩家火箭一律丢弃"（那时发送侧也是关的，
+                // 两头焊死 => P2P 只握手不传数据）。现在接受它，并把这枚火箭标记成"正由 P2P 喂"：
+                //   - 中继副本在新鲜期内到达 -> 丢弃（见 ClientManager.OnPacket_UpdateRocketPrimary）
+                //   - P2P 断流超过 P2PStateFreshSeconds -> 标记过期，自动落回中继单源
+                // 仲裁按【来源】而不是【时间戳】：中继那份的 WorldTime 是服务端重盖的，
+                // 与发送方时钟不同轴，比大小会来回翻 —— 那正是当年"位置来回飘移"的成因。
+                if (ClientManager.world != null && ClientManager.world.rockets.TryGetValue(packet.RocketId, out RocketState state))
                 {
+                    state.UpdateRocketPrimary(packet);
+                    Interpolator.AddPacketToQueue(packet, packet.RocketId, packet.WorldTime);
+                    // 【收尾 2026-10-13】只有本地确实有这枚火箭时才标记 fresh。以前无条件标记：
+                    // 包其实没人吃（死插值器/未同步）也会标记 -> 中继副本被整批丢弃 ->
+                    // P2P 一出问题两条路同时断，这正是"死插值器"症状被放大的原因。
+                    if (LocalManager.syncedRockets.ContainsKey(packet.RocketId))
+                    {
+                        MarkP2PState(packet.RocketId);
+                    }
                     continue;
                 }
-                // TODO: 未知非玩家物体 → 维护轻量显示体（当前无此类物体，暂不发生）。
+                // 本地 world 里没有的物体（未来非玩家邻近物体的显示体）暂不处理。
             }
             catch { }
         }
@@ -313,7 +426,7 @@ public static class P2PConnectionManager
             }
         }
         var activePeer = peers.Values.FirstOrDefault(p => p.Active);
-        var next = ActivePeerCount > 0 ? $"P2P Active (RTT: {activePeer?.RttMs:F0}ms, 抖动: {activePeer?.JitterMs:F0}ms)" : connecting ? "P2P Connecting" : "Relay Fallback";
+        var next = ActivePeerCount > 0 ? $"P2P Active (RTT: {activePeer?.RttMs:F0}ms, jitter: {activePeer?.JitterMs:F0}ms)" : connecting ? "P2P Connecting" : "Relay Fallback";
         if (next != Status)
         {
             if (next == "Relay Fallback" && Status == "P2P Active")
@@ -323,10 +436,94 @@ public static class P2PConnectionManager
         }
     }
 
+    private static void CountInto(Dictionary<string, int> counts, string key)
+    {
+        if (counts.TryGetValue(key, out int existing)) counts[key] = existing + 1;
+        else counts[key] = 1;
+    }
+
+    private static string FormatCounts(Dictionary<string, int> counts)
+    {
+        if (counts == null || counts.Count == 0) return "{}";
+        var sb = new StringBuilder("{");
+        bool first = true;
+        foreach (var kv in counts)
+        {
+            if (!first) sb.Append(',');
+            first = false;
+            sb.Append(kv.Key).Append(':').Append(kv.Value);
+        }
+        return sb.Append('}').ToString();
+    }
+
+    /// <summary>
+    /// F8 / 复制诊断用：把每个 peer 走到哪一步、为什么退化成中继、包都分成了哪几类，全部摊开。
+    /// 纯 ASCII：这段文本可能进日志/上报，F1 控制台没有中日韩字形。
+    /// </summary>
+    public static string DescribePeers()
+    {
+        var sb = new StringBuilder();
+        double active = ActivePeerCount;
+        sb.Append("peers=").Append(peers.Count).Append(" active=").Append(active).Append(" status=").Append(Status);
+        if (LastOfferRejectInfo.Length > 0) sb.Append("\n  ").Append(LastOfferRejectInfo);
+        if (LastRevokedInfo.Length > 0) sb.Append("\n  ").Append(LastRevokedInfo);
+        if (peers.Count == 0) sb.Append("\n  (no pair offered by the server yet)");
+
+        foreach (var kv in peers)
+        {
+            Peer p = kv.Value;
+            double elapsed = (DateTime.UtcNow - p.CreatedUtc).TotalSeconds;
+            sb.Append("\n  peer ").Append(p.PlayerId)
+              .Append(' ').Append(string.IsNullOrEmpty(p.Username) ? "?" : p.Username)
+              .Append(' ').Append(p.Endpoint)
+              .Append(" kcp=").Append(p.KcpInitialized ? "y" : "n")
+              .Append(" active=").Append(p.Active ? "y" : "n")
+              .Append(" fallback=").Append(p.Fallback ? "y" : "n")
+              .Append(" hs=").Append(p.ValidHandshakePackets).Append("/3")
+              .Append(" age=").Append(elapsed.ToString("F1")).Append("s");
+            if (p.Active)
+                sb.Append(" rtt=").Append(p.RttMs.ToString("F0")).Append("ms jitter=").Append(p.JitterMs.ToString("F0")).Append("ms");
+            if (p.Fallback && p.FallbackReason.Length > 0)
+                sb.Append(" reason=[").Append(p.FallbackReason).Append(']');
+            sb.Append(" probes=").Append(p.ProbesSent)
+              .Append(" rx=").Append(p.PacketsReceived).Append("pkt/").Append(p.BytesReceived).Append("B")
+              .Append(" tx=").Append(p.BytesSent).Append("B")
+              .Append(" kinds=").Append(FormatCounts(p.FrameKindCounts))
+              .Append(" types=").Append(FormatCounts(p.PacketTypeCounts));
+        }
+        return sb.ToString();
+    }
+
+    // ——— 按来源仲裁（P2P vs 中继）———
+    // 记录每枚火箭最近一次"被 P2P 喂"的时刻；新鲜期内中继副本一律丢弃。
+    private static readonly Dictionary<int, float> p2pStateLastSeen = new Dictionary<int, float>();
+    public const float P2PStateFreshSeconds = 0.5f;
+
+    private static void MarkP2PState(int rocketId)
+    {
+        p2pStateLastSeen[rocketId] = Time.unscaledTime;
+    }
+
+    /// <summary>这枚火箭是否正由 P2P 单源喂状态（新鲜期内）。</summary>
+    public static bool HasFreshState(int rocketId)
+    {
+        if (p2pStateLastSeen.Count == 0) return false;
+        if (!p2pStateLastSeen.TryGetValue(rocketId, out float last)) return false;
+        if (Time.unscaledTime - last <= P2PStateFreshSeconds) return true;
+        p2pStateLastSeen.Remove(rocketId);
+        return false;
+    }
+
     private sealed class Peer : IDisposable
     {
         public int PlayerId { get; }
-        public IPEndPoint Endpoint { get; }
+        // 对方端口会变（它也会重绑）。变的是【目标】，不是我们自己的 socket。
+        public IPEndPoint Endpoint { get; private set; }
+
+        public void Retarget(IPEndPoint endpoint)
+        {
+            Endpoint = endpoint;
+        }
         public string Token { get; }
         public string Username { get; set; } = string.Empty;
         public int TransitionBufferSeconds { get; }
@@ -350,6 +547,15 @@ public static class P2PConnectionManager
         public double RttMs { get; set; }
         public double JitterMs { get; set; }
         public long LastPingSentTicks { get; set; }
+
+        // 【诊断分细】失败原因 + 包分类计数（F8 / 复制诊断用）
+        public string FallbackReason { get; set; } = string.Empty;
+        public int ProbesSent { get; set; }
+        public int PacketsReceived { get; set; }
+        public long BytesSent { get; set; }
+        public long BytesReceived { get; set; }
+        public readonly Dictionary<string, int> FrameKindCounts = new Dictionary<string, int>();
+        public readonly Dictionary<string, int> PacketTypeCounts = new Dictionary<string, int>();
 
         // 握手超时：CreatedUtc 后 10 秒仍未 Active 则标记 Fallback
         public DateTime HandshakeDeadlineUtc { get; set; } = DateTime.MaxValue;
@@ -389,12 +595,16 @@ public static class P2PConnectionManager
                     uint conv = CreateConversation(ClientManager.playerId, PlayerId);
                     KcpContext = new KcpContext(conv, (data, ctx) => SendToNetwork(data));
 
-                    // 配置 nodelay 模式：低延迟、快速重传
-                    KcpContext.SetNoDelay(1, 10, 2, 1);
-                    KcpContext.SetMtu(1400);
-                    KcpContext.WndSize(256, 512);
+                    // 预设集中在 Common/KcpTransportPresets（默认 balanced = 改动前的值）。
+                    MultiplayerSFS.Common.KcpTransportPresets.Apply(KcpContext, MultiplayerSFS.Common.KcpTransportPresets.P2P);
 
                     KcpInitialized = true;
+                    // 端口广告：把本端 P2P socket 真正绑定的端口告诉服务端。
+                    // 服务端撮合时用的是主传输会话观察到的端点，与这个端口不同 —— 不广告必然打错门。
+                    // 每次重建 socket（含失败后的动态重绑）都会走到这里，端口变化会自动同步。
+                    int localPort = ((IPEndPoint)Socket.Client.LocalEndPoint).Port;
+                    DebugTrace.Note("peer " + PlayerId + " p2p socket port=" + localPort + " advertising to server");
+                    ClientManager.SendPacket(new Packet_P2PEndpoint { Port = localPort });
 
                     // 启动接收循环
                     _receiveLoopCts = new CancellationTokenSource();
@@ -408,6 +618,7 @@ public static class P2PConnectionManager
                 if (Socket != null)
                 {
                     Socket.Send(data, data.Length, Endpoint);
+                    BytesSent += data.Length;
                 }
             }
             catch { }

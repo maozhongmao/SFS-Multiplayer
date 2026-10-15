@@ -1,0 +1,56 @@
+# ===================== 构建产物（不入库）=====================
+bin/
+obj/
+*.pdb
+*.user
+*.suo
+.vs/
+dist/
+artifacts/
+release/
+release-*/
+Client/artifacts/
+Client/release/
+Client/release-*/
+Server/*/release-*/
+Server/*/publish-*/
+Server/dist/
+Server/artifacts/
+ServerCpp/build/
+.smoke-kcp/bin/
+.smoke-kcp/obj/
+
+# ===================== 游戏本体参考程序集（版权物，绝不入库）=====================
+Client/refs/
+refs/
+
+# ===================== 外部/第三方代码（许可证不同，绝不入库）=====================
+Spaceflight-Simulator-MultiplayerMod-main/
+Client/upstream-archive/
+
+# ===================== 反编译 / 逆向参考资料 =====================
+_quarantine/
+Client/analysis/
+docs/sfs-1.6-development/
+
+# ===================== 个人数据（绝不入库）=====================
+.audit/
+Rollback-Mods/
+.trash/
+.tmp-rollback/
+Player.log*
+*.dmp
+
+# ===================== 旧源码备份 / 工具链 =====================
+ServerCpp-backup-*/
+ServerCpp-backup-*/
+tools/zig-*/
+tools/frp/
+tools/easytier-launcher/
+tools/board/
+
+# ===================== 杂项 =====================
+NUL
+*.tmp
+*.zip
+Spaceflight-Simulator-MultiplayerMod-main*

@@ -66,7 +66,7 @@ public sealed class UdpClientTransport : IDisposable
         Task.Run(() =>
         {
             try { ReceiveLoop(token); }
-            catch (System.Exception ex) { System.Console.Error.WriteLine("[SFS-MP] UDP 接收线程异常: " + ex); }
+            catch (System.Exception ex) { System.Console.Error.WriteLine("[SFS-MP] UDP receive thread exception: " + ex); }
         });
         BindLoopAsync(token);
     }
@@ -155,7 +155,7 @@ public sealed class UdpClientTransport : IDisposable
         catch (OperationCanceledException) { }
         catch (System.Exception ex)
         {
-            System.Console.Error.WriteLine("[SFS-MP] UDP 绑定重发异常: " + ex.Message);
+            System.Console.Error.WriteLine("[SFS-MP] UDP rebind exception: " + ex.Message);
         }
     }
 
@@ -281,8 +281,7 @@ public sealed class UdpClientTransport : IDisposable
             {
                 // Create new KCP context for this peer
                 ctx = new KcpContext(GenerateConv(endpoint), KcpOutputCallback);
-                ctx.SetMtu(1400);
-                ctx.SetNoDelay(1, 10, 2, 1);
+                KcpTransportPresets.Apply(ctx, KcpTransportPresets.Relay);
                 peerContexts[endpoint] = ctx;
             }
         }

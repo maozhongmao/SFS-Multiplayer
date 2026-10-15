@@ -1,0 +1,40 @@
+<!--
+  This Source Code Form is subject to the terms of the Mozilla Public
+  License, v. 2.0. If a copy of the MPL was not distributed with this
+  file, You can obtain one at https://mozilla.org/MPL/2.0/.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>VectorDump</AssemblyName>
+    <RootNamespace>VectorDump</RootNamespace>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    引用服务端真正的协议工程，这样可以直接调用真实的 Serialize/Encode 实现，
+    而不是在导出器里重新手抄一遍（手抄会产生转录误差，破坏“实测”原则）。
+    该工程通过 Server\Directory.Build.props 绑定 SpaceWizards.Lidgren.Network.dll，
+    命名空间同为 Lidgren.Network，功能分支与客户端原生 Lidgren 必须字节一致。
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Server\src\SfsMultiplayer.Protocol\SfsMultiplayer.Protocol\SfsMultiplayer.Protocol.csproj" />
+  </ItemGroup>
+
+  <!--
+    原始 <Reference> 不随 ProjectReference 传递（Directory.Build.props 只作用于 Server\ 下的工程），
+    所以这里显式引用同一份 DLL。必须与服务端、Protocol 工程用的是同一个文件，
+    否则会出现两套 Lidgren 类型，向量就失去意义。
+  -->
+  <ItemGroup>
+    <Reference Include="SpaceWizards.Lidgren.Network">
+      <HintPath>..\..\..\Server\third_party\spacewizards-lidgren\SpaceWizards.Lidgren.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

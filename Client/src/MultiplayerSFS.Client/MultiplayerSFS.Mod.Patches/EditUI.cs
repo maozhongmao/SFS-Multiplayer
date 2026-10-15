@@ -134,6 +134,25 @@ public class EditUI
 					ElementGenerator.VerticalSpace(10),
 					ButtonBuilder.CreateIconButton(carrier2, buttonIcons.exit, () => Loc.main.Exit_To_Space_Center, __instance.ExitToHub, CloseMode.None)
 				};
+
+				// 【作弊入口 2026-10-15】根因修复：这个 Prefix 直接 return false 接管了暂停菜单，
+				// 于是原方法（反编译 IL 196910-196932）里"无条件创建 Open Cheats 入口"那几行
+				// 永远不会执行 —— 入口按钮根本没被创建，跟世界设置 AllowsCheats 一点关系都没有
+				// （IL 已证实联机世界里 mode=Sandbox、AllowsCheats=true、FullVersion 恒 true）。
+				// 这里按原版完全相同的方式补一行：同一个 buttonIcons.cheats、同一个翻译键、
+				// 同一个 onClick = SandboxSettings.main.Open（原版 IL 196925-196930）。
+				// 服务端策略要求隐藏入口时（CheatPolicy.BlocksEntry）不加这一行。
+				if (!CheatPolicy.BlocksEntry)
+				{
+					SandboxSettings sandbox = SandboxSettings.main;
+					if (sandbox != null)
+					{
+						list.Add(ElementGenerator.VerticalSpace(10));
+						list.Add(ButtonBuilder.CreateIconButton(carrier2, buttonIcons.cheats,
+							() => Loc.main.Open_Cheats_Button, sandbox.Open, CloseMode.None));
+					}
+				}
+
 				MenuGenerator.OpenMenu(CancelButton.Close, CloseMode.Current, list.ToArray());
 				return false;
 			}

@@ -184,6 +184,15 @@ namespace MultiplayerSFS.Mod.Patches
                     confirmationOpen = false;
                     foreach (int id in rockets)
                     {
+                        // 【安全护栏，2026-10-08 用户明确要求】绝不能删掉别人正在操控的火箭。
+                        // 当前调用路径上 rockets 已经只含"无人控制"的（见 UpdateLaunchpadStatus），
+                        // 但这里**再独立判一次** —— 免得以后有人改判定逻辑就把别人的船删了。
+                        // "靠构造安全"不等于"靠代码安全"。
+                        if (LocalManager.IsRocketControlledByAnyone(id))
+                        {
+                            Debug.Log($"[SFS-MP] ClearLaunchpad: skipped rocket {id} (controlled by a player)");
+                            continue;
+                        }
                         LocalManager.syncedRockets.Remove(id);
                         LocalManager.updateAuthority.Remove(id);
                         ClientManager.world.rockets.Remove(id);
@@ -209,29 +218,9 @@ namespace MultiplayerSFS.Mod.Patches
                     {
                         ScreenManager.main.CloseStack();
                         confirmationOpen = true;
-                        if (players.Count > 0)
-                        {
-                            string message = "Waiting for the following players to leave the launchpad:\n";
-                            message += string.Join("\n", players.Select(id => LocalManager.players[id].username));
-
-                            Func<Screen_Base> menu = MenuGenerator.CreateMenu
-                            (
-                                CancelButton.Close,
-                                CloseMode.Current,
-                                OnOpen,
-                                OnClose,
-                                TextBuilder.CreateText(() => message),
-                                ButtonBuilder.CreateButton
-                                (
-                                    null,
-                                    () => "Close",
-                                    OnClose,
-                                    CloseMode.Current
-                                )
-                            );
-                            ScreenManager.main.OpenScreen(menu);
-                        }
-                        else
+                        // 【2026-10-08】原来这里还有一条"等待这些玩家离开发射台"的分支。
+                        // 已随"不再等别人离开发射台"一起删除：玩家控制的火箭不再计入堵塞，
+                        // players 恒为空，那条分支永远走不到（留着就是死代码）。
                         {
                             string message;
                             if (rockets.Count == 1)
@@ -283,21 +272,35 @@ namespace MultiplayerSFS.Mod.Patches
                 HashSet<int> newRockets = new HashSet<int>();
                 HashSet<int> newPlayers = new HashSet<int>();
 
+                // 【2026-10-08 用户要求：不再"等别人离开发射台"】
+                // 原来只要别人把火箭停在发射台上，后来者就发不出去，并弹
+                // "Waiting for the following players to leave the launchpad"。
+                // 拆掉的理由（用户原话）：发射台 200 米半径内火箭之间本来就不碰撞
+                //（见 LocalManager 的碰撞豁免），"被占着"没有任何技术后果；
+                // 反而让一个人可以永久占着发射台把别人全堵死。
+                //
+                // **仍然保留**：无人控制的幽灵火箭依旧算堵塞（会弹 Clear Launchpad 确认）。
+                // 那不是礼仪问题 —— LocalManager 里写明它会让发射流程/物理卡死主线程，
+                // 而且原生单人的行为也是"新火箭顶掉发射台上的旧火箭"。
                 foreach (KeyValuePair<int, RocketState> rocket in ClientManager.world.rockets)
                 {
-                    if (GameManager_IsOnLaunchpad.IsOnLaunchpad(rocket.Value.location.address, rocket.Value.location.position))
+                    if (!GameManager_IsOnLaunchpad.IsOnLaunchpad(rocket.Value.location.address, rocket.Value.location.position))
+                        continue;
+
+                    // 有玩家在操控的火箭（含自己）不算堵塞
+                    bool controlledBySomeone = false;
+                    foreach (KeyValuePair<int, LocalPlayer> player in LocalManager.players)
                     {
-                        Debug.Log(rocket.Value.location.position);
-                        newRockets.Add(rocket.Key);
-                        foreach (KeyValuePair<int, LocalPlayer> player in LocalManager.players)
+                        if (player.Value.controlledRocket == rocket.Key)
                         {
-                            if (player.Value.controlledRocket == rocket.Key)
-                            {
-                                newPlayers.Add(player.Key);
-                                break;
-                            }
+                            controlledBySomeone = true;
+                            break;
                         }
                     }
+                    if (controlledBySomeone) continue;
+
+                    Debug.Log(rocket.Value.location.position);
+                    newRockets.Add(rocket.Key);
                 }
                 if (newPlayers.Count == 0 && newRockets.Count == 0)
                 {

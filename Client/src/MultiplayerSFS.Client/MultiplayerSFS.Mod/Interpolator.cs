@@ -35,6 +35,33 @@ public class Interpolator : MonoBehaviour
 	// 数据断流后是否已交回本地物理引擎（见 PredictState）：为 true 时不写 transform，由游戏自己积分
 	public bool freeSimulation;
 
+	// 「托管的无主火箭疑似停止推进」探针。交回引擎之后，如果位置不再变化、但速度不为零，
+	// 就说明引擎根本没在积分它（现场表现：像 MC 区块被卸载一样冻住）。
+	// 这条日志就是用来把结论钉死的：bodyType / PhysicsMode / 位移 / 速度 一起打出来。
+	private double hostStallLastX;
+	private double hostStallLastY;
+	private float hostStallNextCheck;
+
+	// 「包的行星 ≠ 本端活体的行星」诊断，上限 20 条避免刷屏。
+	// 位置是"相对某颗行星"的坐标；参照系不一致时，同一组数字会被画到另一颗星球内部，
+	// 表现就是"明明在天上、地图却显示在地下"（或反过来）。
+	private int planetMismatchLogs;
+
+	// 这枚火箭最近一次收到"权威状态包"时，本端的世界时间是多少。
+	// -1 表示本端从未收到过（还没同步上，或它完全归本端驱动）。
+	//
+	// 为什么需要它：判"这枚火箭该不该交还本地引擎"不能用 controlledRocket（本地玩家当前开哪枚），
+	// 那个值在你切换控制权的一瞬间就变了，而服务端是否还在驱动这枚火箭并不会同步变。
+	// 切走的那一枚因此被误判成"本端托管" → 当场设成 Dynamic 交还引擎 → 位置从权威链路上脱钩
+	// → 再收到包时硬对齐 → 表现为"切走控制权的一瞬间火箭瞬移"。
+	// 换成"最近有没有在收这枚火箭的包"就与网络实际状态一致，不受切换动作影响。
+	private double lastAuthoritativePacketLocalTime = -1;
+
+	// 多久没收到这枚火箭的包就算"服务端不再驱动它"。取 0.5 秒：
+	// 服务端每 2 秒一次 Ping，正常发包间隔在 50~1000ms（见 RocketSyncPolicy），
+	// 0.5 秒既能覆盖一次抖动，又快到能在"权威真的移走了"后及时交还引擎。
+	private const double AuthorityLossSeconds = 0.5;
+
 	// 远端火箭位置偏差超过这个距离就直接硬对齐（不走平滑），同时立刻向服务端要一次该火箭的
 	// 权威快照。10 米仍远大于正常插值误差（<1 米），但能挡住"断流期间本地引擎按轨道推进"造成的
 	// 偏差堆积（实测几百米），不会等它涨到几十米才处理。
@@ -47,6 +74,149 @@ public class Interpolator : MonoBehaviour
 	// 【临时诊断】每枚远端火箭每 0.5 秒打一行同步状态，用来定位"高速时一闪一闪"到底来自哪一层。
 	// 查清后删掉。文案必须英文：游戏内控制台没有中文字形，中文会渲染成方框。
 	private const double SyncProbeIntervalSeconds = 0.5;
+
+	// ================== EXP 2026-10-09：远端渲染的"相对参照系"平滑 ==================
+	//
+	// 背景：平滑直接作用在行星相对位置上时，追一个高速目标会**恒定滞后 v×τ**
+	//（InterpolationRenderPolicy 文档原话："恒速稳态滞后 ≈ 速度 × 平滑常数"）。
+	// 近地轨道 2000 m/s、τ≈6.6ms → 约 13 米 —— 就是玩家说的"有点飘"。
+	//
+	// 做法：把平滑放到"以本端玩家自己那枚火箭为原点"的相对坐标里做（见 SetState）。
+	// 被平滑的量从"绝对位置"变成"相对位移"，其变化率是**相对速度**（同轨道约 2 m/s），
+	// 滞后随之降到厘米级。参照点本身是本地模拟的，精确、零延迟。
+	//
+	// 不改变校正能力：权威包照旧设目标，只是平滑换了个参照系 —— "能被校验拉回来"这条不变。
+	// 默认开；F8 面板可切，写 PlayerPrefs 持久化，方便 A/B 对比。
+	public const string RelativeFramePrefsKey = "multiplayersfs.exp.relativeframe";
+	private static bool relativeFrameLoaded;
+	private static bool relativeFrameSmoothing = true;
+
+	public static bool RelativeFrameSmoothing
+	{
+		get
+		{
+			if (!relativeFrameLoaded)
+			{
+				relativeFrameLoaded = true;
+				relativeFrameSmoothing = PlayerPrefs.GetInt(RelativeFramePrefsKey, 1) != 0;
+			}
+			return relativeFrameSmoothing;
+		}
+		set
+		{
+			relativeFrameLoaded = true;
+			relativeFrameSmoothing = value;
+			PlayerPrefs.SetInt(RelativeFramePrefsKey, value ? 1 : 0);
+		}
+	}
+	// ——— 轨迹重建（MC 式：固定延迟 + 定点重建，绝不外推）V1.3.3.5-exp3 ———
+	// 依据：Minecraft 走 TCP、延迟比我们高几十倍却不抖。拆开看它的机制是：
+	//   服务端按"每个实体各自的变间隔"发包（ServerEntity.updateInterval），
+	//   客户端只做定点插值，永不外推（Entity.lerpPositionAndRotationStep：
+	//   d = 1.0 / steps; setPos(Mth.lerp(d, getX(), 目标X), ...)），
+	//   包停了就渐近停在目标上 —— 从不猜、从不瞬移。
+	// 我们反过来：每收到一个包就硬写位置+速度，包间再叠一层 Unity Extrapolate，
+	// 于是"每个包的到达"都变成一次可见修正（速度越快越明显，与 RTT 无关）。
+	// 本开关把渲染换成"固定延迟 + Hermite 重建"：延迟吸收到达抖动，缓冲不够就停住等包。
+	// 关掉即完全回到原来的 re-seed 外推路径，方便当场 A/B。
+	public const string TrajectoryPrefsKey = "multiplayersfs.exp.trajrecon";
+	private static bool trajectoryLoaded;
+	private static bool trajectoryReconstruction = true;
+
+	public static bool TrajectoryReconstruction
+	{
+		get
+		{
+			if (!trajectoryLoaded)
+			{
+				trajectoryLoaded = true;
+				trajectoryReconstruction = PlayerPrefs.GetInt(TrajectoryPrefsKey, 1) != 0;
+			}
+			return trajectoryReconstruction;
+		}
+		set
+		{
+			trajectoryLoaded = true;
+			trajectoryReconstruction = value;
+			PlayerPrefs.SetInt(TrajectoryPrefsKey, value ? 1 : 0);
+		}
+	}
+
+	// 轨迹重建状态：历史包（按 WorldTime 升序）+ 上一次写进去的值（用来省掉无意义的写）
+	private readonly List<Packet_UpdateRocketPrimary> trajectoryHistory = new List<Packet_UpdateRocketPrimary>();
+	private const int TrajectoryHistoryMax = 16;
+	private const double MinPlayoutDelaySeconds = 0.0;
+	private const double MaxPlayoutDelaySeconds = 0.20;
+	private const double MaxTrajectoryExtrapolationSeconds = 0.10;
+
+	// 播放延迟档位。偏移 = 速度 × 延迟，所以这是"两边看起来差多远"的唯一旋钮：
+	//   align    = 0ms        两边看的是同一时刻（偏移只剩 RTT/2）。曲线仍由 Hermite 重建，
+	//                         包与包之间走切线外推（位移小、时间短，误差厘米级），不再硬写。
+	//   balanced = 1 × 包间隔 留半个包的插值窗口，抖动稍大的链路更稳。
+	//   smooth   = 1.5 × 包间隔 = exp3 的原始值，最抗抖动，但高速时偏移最大。
+	public const string PlayoutPrefsKey = "multiplayersfs.exp.playout";
+	public const string PlayoutAlign = "align";
+	public const string PlayoutBalanced = "balanced";
+	public const string PlayoutSmooth = "smooth";
+	private static string playoutMode;
+	private static bool playoutLoaded;
+
+	public static string PlayoutMode
+	{
+		get
+		{
+			if (!playoutLoaded)
+			{
+				playoutLoaded = true;
+				// 默认 align（0ms，位置完全同步）。实测结论（2026-10-09 实机）：
+				//   exp3 smooth = 不抖但慢一个延迟（2000m/s 时约 100m）
+				//   exp6 align  = 完全同步但高速抖（一阶切线丢曲率）
+				// 现在外推是二次的（用最近两包速度差估加速度），所以 align 才敢当默认。
+				// 若某些火箭（推力/大气变化剧烈）仍抖，按 F8 切 smooth 即可回到 exp3 手感。
+				playoutMode = PlayerPrefs.GetString(PlayoutPrefsKey, PlayoutAlign);
+				if (playoutMode != PlayoutAlign && playoutMode != PlayoutBalanced && playoutMode != PlayoutSmooth)
+					playoutMode = PlayoutAlign;
+			}
+			return playoutMode;
+		}
+		set
+		{
+			playoutLoaded = true;
+			playoutMode = value;
+			PlayerPrefs.SetString(PlayoutPrefsKey, value);
+		}
+	}
+
+	public static string NextPlayoutMode(string current)
+	{
+		if (current == PlayoutAlign) return PlayoutBalanced;
+		if (current == PlayoutBalanced) return PlayoutSmooth;
+		return PlayoutAlign;
+	}
+
+	private static double PlayoutDelayFactor
+	{
+		get
+		{
+			string mode = PlayoutMode;
+			if (mode == PlayoutAlign) return 0.0;
+			if (mode == PlayoutBalanced) return 1.0;
+			return 1.5;
+		}
+	}
+	private double writtenX = double.NaN;
+	private double writtenY = double.NaN;
+	private float writtenRot = float.NaN;
+
+	// ——— 预测误差"软吸收"（exp6 基线 + 更好的平滑）———
+	// 包落地时：把"我们预测它会落的位置"与"它真实落点"之间的差记成反向修正量，
+	// 再用 ~45ms 指数衰减滑着抹平 —— 把"啪一下瞬间补回来"（那个抖）变成"滑过去补回来"。
+	// 与旧平滑的本质区别：修正量**稳态归零**，所以不会引入 v × τ 的恒定滞后（"飘"的病根）。
+	// 只在接缝后几十毫秒存在；超过 5 米说明不是预测误差而是真跳变（换星球/传送/权威切换），那就不平滑、直接硬对齐。
+	private double correctionX;
+	private double correctionY;
+	private const double CorrectionTauSeconds = 0.045;
+	private const double CorrectionSnapMeters = 5.0;
 	private double nextSyncProbeTime;
 
 	// ——— 预测式同步（re-seed 形态，V1.2.3.20）———
@@ -118,10 +288,23 @@ public class Interpolator : MonoBehaviour
 		{
 			return;
 		}
+		// 【兜底 2026-10-10】原来这里判的是 interpolator.rocket == null —— 但 LocalRocket 的
+		// 构造函数早就写了 interpolator.rocket = this，永远非 null ⇒ 这段是死代码 ✗。
+		// 真正需要判的是 currentUpdate（Update() 的闸门）。改对之后，任何忘了 prime 的 spawn 路径
+		// 都会在收到第一个状态包时自动复活，从根上封住"死插值器"这一类问题。
 		if (interpolator.rocket == null)
 		{
 			interpolator.rocket = value;
+		}
+		if (interpolator.currentUpdate == null && value.rocket != null)
+		{
 			interpolator.currentUpdate = value.rocket.ToUpdatePacketPrimary(rocketId);
+			if (interpolator.currentUpdate != null)
+			{
+				interpolator.currentUpdate.WorldTime = 0.0;
+			}
+			interpolator.isNewlyCreated = true;
+			Debug.Log("[SFS-MP] revived dead interpolator on first state packet: id=" + rocketId);
 		}
 		if (interpolator.freeSimulation)
 		{
@@ -135,12 +318,30 @@ public class Interpolator : MonoBehaviour
 				Location local = interpolator.rocket.rocket.location.Value;
 				double dx = local.position.x - resumed.Location.position.x;
 				double dy = local.position.y - resumed.Location.position.y;
-				Debug.Log($"[SFS-MP] 数据恢复: 火箭 {rocketId} 本地模拟与包位置相差 {Math.Sqrt(dx * dx + dy * dy):F1}m "
-						  + $"(本地行星={local.planet.codeName} 包行星={resumed.Location.address})");
+				Debug.Log($"[SFS-MP] resume: rocket {rocketId} local sim differs from the packet by {Math.Sqrt(dx * dx + dy * dy):F1}m "
+						  + $"(local planet={local.planet.codeName} packet planet={resumed.Location.address})");
 			}
 		}
 		if (packet is Packet_UpdateRocketPrimary item)
 		{
+			// 【结构对账 2026-10-10】权威方把"活体零件 ID 集合"的哈希带在状态包里（每秒）。
+			// 不一致 = 结构分叉 -> 主动要一次权威快照（限流 5 秒/枚），由既有重建路径收敛。
+			// 这让"任何一条路径漏了结构事件"都能在 1~2 秒内自愈，且只在真不一致时才重建。
+			if (interpolator.rocket != null && interpolator.rocket.parts != null)
+			{
+				// 只跟【线格式】比：活体零件重算出来的身份两端不收敛（我之前犯的错）
+				if (StructureSync.HashForWire(item.RocketId) != item.StructureHash)
+				{
+					StructureSync.CheckRemote(item.RocketId, item.StructureHash, null);
+				}
+			}
+			// 打时间戳：Update() 靠它判断"这枚火箭还在不在被服务端驱动"。
+			// 记本端的世界时间而不是 Time.unscaledTime，因为 Update() 的判据要和
+			// ClientManager.world.WorldTime 放在同一个时间轴上比较。
+			if (ClientManager.world != null)
+			{
+				interpolator.lastAuthoritativePacketLocalTime = ClientManager.world.WorldTime;
+			}
 			if (interpolator.currentUpdate != null && item.WorldTime == interpolator.currentUpdate.WorldTime) return;
 			// 手写线性查找替代 updateBuffer.FindIndex(lambda)：FindIndex 每次调用都要分配
 			// 一个闭包 + 委托（每个收到的包两次），而且缓冲区只有 ≤10 个元素，手写循环更快。
@@ -202,16 +403,32 @@ public class Interpolator : MonoBehaviour
 		// 只有本地玩家真正控制的火箭才走权威路径；否则强制非权威插值，保证对方火箭在本端动起来。
 		bool isLocalPlayerControlled = LocalManager.Player != null && LocalManager.Player.controlledRocket.Value == currentUpdate.RocketId;
 		bool hosted = LocalManager.updateAuthority.Contains(currentUpdate.RocketId);
-		// 本端托管、但没人在开这枚火箭（发射台上留下的 / 分离掉的 / 切走后留下的）：
+		// 本端托管、但服务端已经不再驱动这枚火箭（发射台上留下的 / 分离掉的 / 切走后服务端也放手了的）：
 		// 必须由本端游戏引擎推进（on-rails 轨道或物理），模组只负责把它的真实状态发出去。
 		// 反例就在下面：一旦被设成 Kinematic + Extrapolate，而它又收不到任何远端包
 		// （本端就是权威，没人会发它的状态过来），SetState 会一直 early-return，
 		// 于是没有任何代码把它设回 Dynamic —— Unity 便按最后速度对它做匀速外推，
 		// 表现为"无人操控的火箭按固定方向一直飞"；Kinematic 还会顶飞真实火箭。
-		// 只在对端有包在流时才让出（那种情况说明权威集合误含了对方在操控的火箭，不能抢）。
-		bool remoteDriven = ClientManager.world != null && ClientManager.world.WorldTime - currentUpdate.WorldTime < 0.5;
-		if (hosted && !isLocalPlayerControlled && !remoteDriven)
+		//
+		// 【V1.2.5 修正】判据从"服务端还托管吗(remoteDriven)"改成"本端最近有没有在收这枚火箭的包"。
+		// 旧判据在"切换控制权"那一刻必然出错：controlledRocket 立刻变成另一枚，于是这枚被判成
+		// "托管但没人开" → 当场设 Dynamic 交还引擎 → 位置从权威链路脱钩 → 收到下个包时硬对齐
+		// → 视觉上就是"切走的瞬间火箭瞬移"。同一个错判还会连带两个症状：
+		// 免碰撞豁免（判 controlledRocketIdsScratch）与"非权威火箭不爆炸"（判 bodyType != Dynamic）
+		// 也都会跟着乱。
+		// 新的判据只反映网络实际状态，与切换动作无关。
+		double localWorldTime = ClientManager.world != null ? ClientManager.world.WorldTime : -1;
+		bool stillReceivingPackets = localWorldTime >= 0
+			&& lastAuthoritativePacketLocalTime >= 0
+			&& (localWorldTime - lastAuthoritativePacketLocalTime) < AuthorityLossSeconds;
+		if (hosted && !isLocalPlayerControlled && !stillReceivingPackets)
 		{
+			// 【交回引擎前先把最新已知状态写一次】以前这里只翻 bodyType 就 return，
+			// 引擎是从"上一帧 transform 停在哪儿"起步的，而不是从我们最后收到的权威状态起步。
+			if (!freeSimulation && currentUpdate != null)
+			{
+				ApplyStateImmediately(currentUpdate.Location.ToVanillaLocation(), currentUpdate.Rotation, currentUpdate.AngularVelocity);
+			}
 			if (rocket.rocket.rb2d.bodyType != RigidbodyType2D.Dynamic)
 			{
 				rocket.rocket.rb2d.bodyType = RigidbodyType2D.Dynamic;
@@ -220,7 +437,11 @@ public class Interpolator : MonoBehaviour
 			{
 				rocket.rocket.rb2d.interpolation = RigidbodyInterpolation2D.None;
 			}
+			// 从 Kinematic 切到 Dynamic 的刚体可能仍处于休眠态，休眠 = 不被积分 = 看起来"冻住"。
+			// 显式唤醒一次；这是"无人操控的火箭像区块卸载一样停止更新"最可能的一环。
+			try { rocket.rocket.rb2d.WakeUp(); } catch (System.Exception) { }
 			freeSimulation = true;
+			HostStallProbe();
 			return;
 		}
 		bool isAuthority = hosted && isLocalPlayerControlled;
@@ -343,10 +564,51 @@ public class Interpolator : MonoBehaviour
 		ApplyStateImmediately(first.Location.ToVanillaLocation(), first.Rotation, first.AngularVelocity);
 	}
 
+	// 包里说这颗行星、本端活体却在另一颗上 —— 位置会被当成另一个参照系的坐标。
+	private void ReportPlanetMismatch(Location want)
+	{
+		if (planetMismatchLogs >= 20) return;
+		if (want == null || want.planet == null) return;
+		if (rocket == null || rocket.rocket == null || rocket.rocket.location == null) return;
+		Location cur = rocket.rocket.location.Value;
+		if (cur == null || cur.planet == null || cur.planet == want.planet) return;
+		planetMismatchLogs++;
+		UnityEngine.Debug.LogWarning($"[SFS-MP] planet mismatch: id={currentUpdate?.RocketId} "
+			+ $"packet={want.planet.codeName} local={cur.planet.codeName} "
+			+ $"packet pos=({want.position.x:F0},{want.position.y:F0}) local pos=({cur.position.x:F0},{cur.position.y:F0})");
+	}
+
+	// 托管给引擎的无主火箭，每 2 秒核对一次它到底有没有在动。
+	private void HostStallProbe()
+	{
+		if (rocket == null || rocket.rocket == null || rocket.rocket.location == null) return;
+		if (Time.unscaledTime < hostStallNextCheck) return;
+		hostStallNextCheck = Time.unscaledTime + 2f;
+		Location live = rocket.rocket.location.Value;
+		if (live == null || live.planet == null) return;
+		double dx = live.position.x - hostStallLastX;
+		double dy = live.position.y - hostStallLastY;
+		double moved = System.Math.Sqrt(dx * dx + dy * dy);
+		double speed = live.velocity.magnitude;
+		// 第一次采样（基准还是 0,0）只记基准，不判定。
+		if (hostStallLastX != 0.0 || hostStallLastY != 0.0)
+		{
+			if (moved < 1.0 && speed > 5.0)
+			{
+				UnityEngine.Debug.LogWarning($"[SFS-MP] managed unowned rocket appears to have stopped thrusting: id={currentUpdate?.RocketId} "
+					+ $"2s moved={moved:F2}m speed={speed:F1}m/s body={rocket.rocket.rb2d.bodyType} "
+					+ $"phys={rocket.rocket.physics.PhysicsMode} asleep={rocket.rocket.rb2d.IsSleeping()} planet={live.planet.codeName}");
+			}
+		}
+		hostStallLastX = live.position.x;
+		hostStallLastY = live.position.y;
+	}
+
 	private void ApplyStateImmediately(Location loc, float rot, float angVel)
 	{
 		loc = ClampBelowTerrain(loc);
 		if (loc == null) return;   // 地形未就绪：本帧不写位置/速度/角度，避免把未钳制的状态灌进物理体
+		ReportPlanetMismatch(loc);
 		rocket.rocket.rb2d.transform.eulerAngles = new Vector3(0f, 0f, rot);
 		rocket.rocket.rb2d.angularVelocity = angVel;
 		if (rocket.rocket.physics.PhysicsMode)
@@ -378,7 +640,7 @@ public class Interpolator : MonoBehaviour
 				ApplyStateImmediately(lastPacket.Location.ToVanillaLocation(), lastPacket.Rotation, lastPacket.AngularVelocity);
 				// 一次性诊断：证明轨迹已交回本端引擎（之后本端不再覆盖它，引擎按轨道/物理推进，
 				// 发出去的 Primary 包里速度会随时间变化 —— 而不是恒定的直线速度）。
-				Debug.Log($"[SFS-MP] 无操控的托管火箭交回本地引擎: id={lastPacket.RocketId} "
+				Debug.Log($"[SFS-MP] handing an uncontrolled managed rocket back to the local engine: id={lastPacket.RocketId} "
 						+ $"planet={lastPacket.Location.address} "
 						+ $"pos=({lastPacket.Location.position.x:F1},{lastPacket.Location.position.y:F1}) "
 						+ $"vel=({lastPacket.Location.velocity.x:F1},{lastPacket.Location.velocity.y:F1})");
@@ -406,7 +668,7 @@ public class Interpolator : MonoBehaviour
 					// 表现为"火箭莫名其妙突然飞起来"。
 					ApplyStateImmediately(loc, rot, lastPacket.AngularVelocity);
 					freeSimulation = true;
-					Debug.Log($"[SFS-MP] 数据断流 {num:F2}s，交回本地物理: id={lastPacket.RocketId} "
+					Debug.Log($"[SFS-MP] no data for {num:F2}s; handing back to local physics: id={lastPacket.RocketId} "
 							  + $"planet={lastPacket.Location.address} pos=({loc.position.x:F1},{loc.position.y:F1}) "
 							  + $"vel=({loc.velocity.x:F1},{loc.velocity.y:F1}) angVel={lastPacket.AngularVelocity:F3}");
 				}
@@ -449,6 +711,13 @@ public class Interpolator : MonoBehaviour
 		// 表现为远端火箭"彻底不动"。
 		if (updateBuffer.Count > 0)
 		{
+			if (TrajectoryReconstruction)
+			{
+				// 【顺序要紧】先算"按老轨迹预测它会落在哪"、把差记成软吸收修正量，再并入历史。
+				for (int i = 0; i < updateBuffer.Count; i++) AbsorbPredictionError(updateBuffer[i]);
+				// MC 式：这一批包按 WorldTime 全部压进轨迹历史（不再"只留最后一个，其余丢掉"）
+				for (int i = 0; i < updateBuffer.Count; i++) AppendTrajectory(updateBuffer[i]);
+			}
 			Packet_UpdateRocketPrimary newest = updateBuffer[updateBuffer.Count - 1];
 			updateBuffer.Clear();
 			// 用相邻包的 WorldTime 差估发包间隔 → 自适应的抖动缓冲区长度（见 RenderDelaySeconds）
@@ -468,6 +737,12 @@ public class Interpolator : MonoBehaviour
 				rocket.rocket.rb2d.bodyType = RigidbodyType2D.Kinematic;
 			if (rocket.rocket.rb2d.interpolation != RigidbodyInterpolation2D.Extrapolate)
 				rocket.rocket.rb2d.interpolation = RigidbodyInterpolation2D.Extrapolate;
+			if (TrajectoryReconstruction)
+			{
+				// 不硬写：交给每帧的轨迹重建（包少来靠固定延迟吸收，绝不猜）
+				SampleTrajectory();
+				return;
+			}
 			ReSeedFromAuthoritative(newest);
 			return;
 		}
@@ -495,6 +770,167 @@ public class Interpolator : MonoBehaviour
 			rocket.rocket.rb2d.bodyType = RigidbodyType2D.Kinematic;
 		if (rocket.rocket.rb2d.interpolation != RigidbodyInterpolation2D.Extrapolate)
 			rocket.rocket.rb2d.interpolation = RigidbodyInterpolation2D.Extrapolate;
+		if (TrajectoryReconstruction) SampleTrajectory();
+	}
+
+	// ——— 轨迹重建实现（MC 式）———
+	// 历史里按 WorldTime 升序保存最近的权威包；负责去重插入与裁剪。
+	private void AppendTrajectory(Packet_UpdateRocketPrimary packet)
+	{
+		if (packet == null) return;
+		int n = trajectoryHistory.Count;
+		if (n == 0 || trajectoryHistory[n - 1].WorldTime < packet.WorldTime)
+		{
+			trajectoryHistory.Add(packet);
+		}
+		else
+		{
+			int i = n - 1;
+			while (i >= 0 && trajectoryHistory[i].WorldTime > packet.WorldTime) i--;
+			if (i >= 0 && trajectoryHistory[i].WorldTime == packet.WorldTime) trajectoryHistory[i] = packet;
+			else trajectoryHistory.Insert(i + 1, packet);
+		}
+		while (trajectoryHistory.Count > TrajectoryHistoryMax) trajectoryHistory.RemoveAt(0);
+	}
+
+	// 采样时刻 = 本端世界时间 - 固定播放延迟；只在两个已知包之间重建，绝不长距离外推。
+	// 采样点比最老的包还早（刚加入 / 换星球 / 长断流恢复）→ 硬对齐最新包一次。
+	// 采样点比最新的包还晚（包没到）→ 最多切向外推 100ms，超过就停在原地等包（与 MC 一致）。
+	private void SampleTrajectory()
+	{
+		int n = trajectoryHistory.Count;
+		if (n == 0 || ClientManager.world == null) return;
+		double now = ClientManager.world.WorldTime;
+		if (now <= 0.0) return;
+
+		double delay = smoothedPacketIntervalSeconds * PlayoutDelayFactor;
+		if (delay < MinPlayoutDelaySeconds) delay = MinPlayoutDelaySeconds;
+		else if (delay > MaxPlayoutDelaySeconds) delay = MaxPlayoutDelaySeconds;
+		double sampleTime = now - delay;
+		Packet_UpdateRocketPrimary newest = trajectoryHistory[n - 1];
+
+		if (sampleTime <= newest.WorldTime)
+		{
+			int i = n - 2;
+			while (i >= 0 && trajectoryHistory[i].WorldTime > sampleTime) i--;
+			if (i >= 0)
+			{
+				Packet_UpdateRocketPrimary a = trajectoryHistory[i];
+				Packet_UpdateRocketPrimary b = trajectoryHistory[i + 1];
+				double span = b.WorldTime - a.WorldTime;
+				if (span > 1e-6)
+				{
+					double f = (sampleTime - a.WorldTime) / span;
+					if (f < 0.0) f = 0.0; else if (f > 1.0) f = 1.0;
+					HermiteInterpolation(a, b, f, out Location loc, out float rot, out float angVel);
+					WriteTrajectory(loc, rot, angVel, false);
+					ProbeTrajectory(newest, 0.0, true);
+					return;
+				}
+			}
+			WriteTrajectory(newest.Location.ToVanillaLocation(), newest.Rotation, newest.AngularVelocity, true);
+			return;
+		}
+
+		double over = sampleTime - newest.WorldTime;
+		double overLimit = MaxTrajectoryExtrapolationSeconds;
+		double intervalLimit = smoothedPacketIntervalSeconds * 2.0;
+		if (intervalLimit > overLimit) overLimit = intervalLimit;   // 包间隔大时放宽，否则会频繁冻结
+		if (over > overLimit) return;
+		// 【exp6 基线】一阶切线继续：位置 + 速度×时间。
+		// 刻意不再加二次项：加速度是从两个包的速度差估的，低速时速度差几乎全是浮点噪声，
+		// 二次预测自己就会抖。预测误差交给下面的软吸收去抹平，而不是靠把预测做得更复杂。
+		Location extrapolated = newest.Location.ToVanillaLocation();
+		extrapolated.position += newest.Location.velocity * over;
+		extrapolated.velocity = newest.Location.velocity;
+		WriteTrajectory(extrapolated, newest.Rotation + newest.AngularVelocity * (float)over, newest.AngularVelocity, false);
+		ProbeTrajectory(newest, 0.0, false);
+	}
+
+	// 用当前历史（一阶切线）预测 time 时刻的位置 —— 即"我们以为下一个包会说什么"。
+	private bool PredictFromNewest(double time, out Location loc, out float rot)
+	{
+		int n = trajectoryHistory.Count;
+		if (n == 0)
+		{
+			loc = null;
+			rot = 0f;
+			return false;
+		}
+		Packet_UpdateRocketPrimary newest = trajectoryHistory[n - 1];
+		double over = time - newest.WorldTime;
+		loc = newest.Location.ToVanillaLocation();
+		loc.position += newest.Location.velocity * over;
+		loc.velocity = newest.Location.velocity;
+		rot = newest.Rotation + newest.AngularVelocity * (float)over;
+		return true;
+	}
+
+	// 包到达：把"预测落点"与"真实落点"之差吸收成反向修正量（随后由 WriteTrajectory 逐帧衰减）。
+	private void AbsorbPredictionError(Packet_UpdateRocketPrimary packet)
+	{
+		if (packet == null || packet.Location == null) return;
+		Location predicted;
+		float predictedRot;
+		if (!PredictFromNewest(packet.WorldTime, out predicted, out predictedRot)) return;
+		Location actual = packet.Location.ToVanillaLocation();
+		double dx = actual.position.x - predicted.position.x;
+		double dy = actual.position.y - predicted.position.y;
+		if (dx * dx + dy * dy > CorrectionSnapMeters * CorrectionSnapMeters)
+		{
+			// 差得太多 = 不是预测误差（换星球/传送/权威切换）：不平滑，交给硬对齐
+			correctionX = 0.0;
+			correctionY = 0.0;
+			return;
+		}
+		correctionX -= dx;
+		correctionY -= dy;
+	}
+
+	// 【诊断回归 2026-10-09】exp3 把渲染路径换成轨迹重建后，原来的 syncprobe 在 SetState 里，
+	// 再也走不到 —— 日志里 syncprobe 计数为 0。挪到真正生效的地方：报出锚包有多旧、预测项有多大。
+	private void ProbeTrajectory(Packet_UpdateRocketPrimary newest, double curvatureMeters, bool interpolated)
+	{
+		if (Time.unscaledTime < nextSyncProbeTime) return;
+		nextSyncProbeTime = Time.unscaledTime + SyncProbeIntervalSeconds;
+		double lagMs = ClientManager.world != null ? (ClientManager.world.WorldTime - newest.WorldTime) * 1000.0 : -1.0;
+		Vector2 v = WorldView.ToLocalVelocity(newest.Location.velocity);
+		Debug.Log($"[SFS-MP][syncprobe] id={newest.RocketId} mode={PlayoutMode} src={(interpolated ? "interp" : "predict")} "
+			+ $"v={v.magnitude:F0}m/s delay={Math.Max(0.0, lagMs):F0}ms interval={smoothedPacketIntervalSeconds * 1000:F0}ms "
+			+ $"hist={trajectoryHistory.Count} corr={Math.Sqrt(correctionX * correctionX + correctionY * correctionY):F2}m");
+	}
+
+	private void WriteTrajectory(Location loc, float rot, float angVel, bool force)
+	{
+		if (force)
+		{
+			correctionX = 0.0;   // 硬对齐 = 瞬移：修正量必须清零，否则会把上次的残差带过去
+			correctionY = 0.0;
+		}
+		else
+		{
+			// 逐帧指数衰减；修正量稳态归零，因此不产生恒定滞后，只把接缝"滑"过去
+			double dt = Time.unscaledDeltaTime;
+			if (dt > 0.0 && dt < 0.5)
+			{
+				double decay = Math.Exp(-dt / CorrectionTauSeconds);
+				correctionX *= decay;
+				correctionY *= decay;
+			}
+			loc.position.x += correctionX;
+			loc.position.y += correctionY;
+		}
+		if (!force && !float.IsNaN(writtenRot)
+			&& Math.Abs(loc.position.x - writtenX) < 1e-3
+			&& Math.Abs(loc.position.y - writtenY) < 1e-3
+			&& Math.Abs(rot - writtenRot) < 1e-4f)
+		{
+			return;   // 这一帧没动到肉眼可辨的程度：不碰物理体
+		}
+		writtenX = loc.position.x;
+		writtenY = loc.position.y;
+		writtenRot = rot;
+		ApplyStateImmediately(loc, rot, angVel);
 	}
 
 	// 每收到一个权威包，把权威状态整份写回（走游戏自己的物理 API）。
@@ -633,7 +1069,9 @@ public class Interpolator : MonoBehaviour
 
 	private static bool terrainLookupFailed;
 
-	private static Location ClampBelowTerrain(Location loc)
+	// 供 LocalManager 在"建火箭/快照刷新"这类一次性写入处复用。
+	// 语义：返回钳制后的 Location；返回 null = 地形数据未就绪、本帧无法判断（调用方必须跳过写入）。
+	public static Location ClampBelowTerrain(Location loc)
 	{
 		if (loc == null || loc.planet == null || loc.position.sqrMagnitude <= 1E-10)
 		{
@@ -684,7 +1122,7 @@ public class Interpolator : MonoBehaviour
 			if (!terrainLookupFailed)
 			{
 				terrainLookupFailed = true;
-				UnityEngine.Debug.LogWarning("[SFS-MP] 行星地形数据未就绪，暂时跳过位置钳制（会自动恢复）。");
+				UnityEngine.Debug.LogWarning("[SFS-MP] planet terrain data is not ready; skipping position clamping for now (recovers automatically).");
 			}
 			// 返回 null 表示"本帧无法判断位置是否在地面以下"：调用方必须跳过本帧位置写入。
 			// 旧版在这里原样返回未钳制的 Location，调用方照样写进物理体 —— 位置落到地形内部后，
@@ -761,10 +1199,32 @@ public class Interpolator : MonoBehaviour
 			}
 			else
 			{
-				(loc.position.x, loc.position.y) = InterpolationRenderPolicy.ResolvePosition(
-					smoothing, delta, current.position.x, current.position.y, loc.position.x, loc.position.y);
-				(loc.velocity.x, loc.velocity.y) = InterpolationRenderPolicy.ResolveVelocity(
-					smoothing, delta, current.velocity.x, current.velocity.y, loc.velocity.x, loc.velocity.y);
+				// 【EXP 2026-10-09】平滑在"以本端玩家火箭为原点"的相对坐标里做。
+				// 取不到参照点（没在开船 / 星球不同 / 就是它自己）时，ox..ovy 全为 0，
+				// 于是退化成与原来完全一致的绝对坐标平滑 —— 不会更差。
+				double ox = 0.0, oy = 0.0, ovx = 0.0, ovy = 0.0;
+				if (RelativeFrameSmoothing && currentUpdate != null && loc.planet != null
+					&& LocalManager.TryGetLocalReferencePose(currentUpdate.RocketId, loc.planet.codeName,
+						out ox, out oy, out ovx, out ovy))
+				{
+					(loc.position.x, loc.position.y) = InterpolationRenderPolicy.ResolvePosition(
+						smoothing, delta,
+						current.position.x - ox, current.position.y - oy,
+						loc.position.x - ox, loc.position.y - oy);
+					(loc.velocity.x, loc.velocity.y) = InterpolationRenderPolicy.ResolveVelocity(
+						smoothing, delta,
+						current.velocity.x - ovx, current.velocity.y - ovy,
+						loc.velocity.x - ovx, loc.velocity.y - ovy);
+					loc.position.x += ox; loc.position.y += oy;
+					loc.velocity.x += ovx; loc.velocity.y += ovy;
+				}
+				else
+				{
+					(loc.position.x, loc.position.y) = InterpolationRenderPolicy.ResolvePosition(
+						smoothing, delta, current.position.x, current.position.y, loc.position.x, loc.position.y);
+					(loc.velocity.x, loc.velocity.y) = InterpolationRenderPolicy.ResolveVelocity(
+						smoothing, delta, current.velocity.x, current.velocity.y, loc.velocity.x, loc.velocity.y);
+				}
 			}
 		}
 		rot = InterpolationRenderPolicy.ResolveRotation(smoothing, delta, rocket.rocket.rb2d.transform.eulerAngles.z, rot);
@@ -853,7 +1313,17 @@ public class Interpolator : MonoBehaviour
 
 	private void OnPacket_DestroyPart(Packet_DestroyPart packet)
 	{
-		if (rocket.parts.TryGetValue(packet.PartId, out var value) && value != null)
+		// 【静默丢失修复 2026-10-10】以前 TryGetValue 失败就一声不吭丢掉整次销毁：
+		// 权威端少了零件、本端留着 -> live = incoming + 1（实测 15 次全是这个签名）
+		// -> 只能靠整枚重建兜底（重建既修状态又重置插值器 = 抖）。现在：喊出来 + 立刻要一次权威快照自愈。
+		if (!rocket.parts.TryGetValue(packet.PartId, out var value) || value == null)
+		{
+			Debug.LogWarning("[SFS-MP] destroy part " + packet.PartId + " not found on rocket " + packet.RocketId
+				+ " (parts=" + rocket.parts.Count + "); requesting authoritative resync");
+			ClientManager.RequestRocketSnapshot(packet.RocketId);
+			return;
+		}
+		if (value != null)
 		{
 			LocalManager.TrueDestructionReason = packet.Reason;
 			// 爆炸特效走每帧预算：整枚火箭被炸时不让一帧内生成几十个特效（那是卡顿来源）。

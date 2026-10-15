@@ -175,7 +175,7 @@ public static class LocalManager
                 if (instPrefab != null)
                 {
                     cachedRocketPrefab = instPrefab;
-                    UnityEngine.Debug.Log($"[SFS-MP] RocketPrefab 解析成功: prefab={instPrefab.GetInstanceID()}");
+                    UnityEngine.Debug.Log($"[SFS-MP] RocketPrefab resolved: prefab={instPrefab.GetInstanceID()}");
                     return instPrefab;
                 }
             }
@@ -183,7 +183,7 @@ public static class LocalManager
             if (staticPrefab != null)
             {
                 cachedRocketPrefab = staticPrefab;
-                UnityEngine.Debug.Log($"[SFS-MP] RocketPrefab 回退静态 prefab={staticPrefab.GetInstanceID()}");
+                UnityEngine.Debug.Log($"[SFS-MP] RocketPrefab fell back to the static prefab={staticPrefab.GetInstanceID()}");
                 return staticPrefab;
             }
             return null;
@@ -290,6 +290,13 @@ public static class LocalManager
         SFS.UI.Menu.loading.Close();
     }
 
+    // 放弃进入世界（重试次数用尽 / 没有可重放的信息）：关屏并停掉超时计时。
+    // 供 ClientManager 的重试逻辑调用 —— 它需要"停表"，但不必知道计时细节。
+    public static void AbortWorldLoading()
+    {
+        CloseWorldLoadingScreen();
+    }
+
     // 进入世界时必须绕过 prefab 解析冷却：否则上一帧的解析失败会让整批火箭建不出来
     private static void ResetPrefabLookupCooldown()
     {
@@ -321,7 +328,7 @@ public static class LocalManager
         pendingControlLocalIds.Remove(localId);
         if (unsyncedToControl == localId) unsyncedToControl = -1;
         if (localRocket == null || localRocket.rocket == null) return;
-        UnityEngine.Debug.LogWarning($"[SFS-MP] 服务端未认领临时火箭（localId={localId}），本地回收，避免留下不可控幽灵。");
+        UnityEngine.Debug.LogWarning($"[SFS-MP] the server never claimed the temporary rocket (localId={localId}); reclaiming it locally so it does not stay an uncontrollable ghost.");
         // 用 (DestructionReason)4 这条"自定义原因"通道绕过联机的销毁拦截（与 DestroyLocalRocket 同款）
         SFS.World.RocketManager.DestroyRocket(localRocket.rocket, (SFS.World.DestructionReason)4);
     }
@@ -355,6 +362,62 @@ public static class LocalManager
     // 每次在本端生成/发射新火箭之前，先把发射台上所有没人操控的影子火箭清掉。
     // 用户实测：这些幽灵在本端世界里是带碰撞箱的实体，新火箭一生成就和它们叠在一起，
     // 发射流程/物理会把主线程卡死（程序未响应 = 这次要修的 bug）。原生单人行为也是"新火箭顶掉发射台上的旧火箭"。
+    /// <summary>
+    /// 这枚火箭当前是否有人（任何人，含本端）在操控。
+    ///
+    /// 【安全护栏，2026-10-08 用户明确要求】任何"清理发射台 / 删除火箭"的路径都必须先问这一句 ——
+    /// **绝不能删掉别人正在操控的火箭**（会把人家的船直接弄没，那是最招骂的一类 bug）。
+    /// 判据取三处并集，宁可不删也不误删：
+    ///   ①  本端玩家正在操控的；
+    ///   ②  服务端同步下来的"某玩家控制某火箭"表；
+    ///   ③  游戏自己的 hasControl 硬标志（正在飞的一律算）。
+    /// </summary>
+    public static bool IsRocketControlledByAnyone(int rocketId)
+    {
+        if (rocketId < 0) return false;
+        if (Player != null && Player.controlledRocket.Value == rocketId) return true;
+        if (players != null)
+        {
+            foreach (KeyValuePair<int, LocalPlayer> kvp in players)
+            {
+                if (kvp.Value != null && kvp.Value.controlledRocket == rocketId) return true;
+            }
+        }
+        if (syncedRockets != null && syncedRockets.TryGetValue(rocketId, out LocalRocket local)
+            && local != null && local.rocket != null && local.rocket.hasControl.Value)
+        {
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 取"本端玩家自己那枚火箭"的位置/速度，作为远端火箭渲染的**参照原点**（EXP 用）。
+    ///
+    /// 为什么拿它当原点：它是本端**本地模拟**的 —— 位置精确、零延迟、零网络抖动。
+    /// 把远端渲染的平滑放到"相对它"的坐标里做，被平滑的量就从"行星相对位置"
+    ///（变化率 = 绝对速度，2000 m/s 量级）变成"相对位移"（同轨道约 2 m/s），
+    /// 平滑的稳态滞后随之从 v×τ 降到 Δv×τ（13 米 → 厘米级）。
+    ///
+    /// 返回 false 的情形（调用方必须回退到原有行为）：没在开船、火箭实例不在、
+    /// 星球不同、或者参照点就是被渲染的那枚自己。
+    /// </summary>
+    public static bool TryGetLocalReferencePose(int excludingRocketId, string planetCode,
+        out double x, out double y, out double vx, out double vy)
+    {
+        x = 0.0; y = 0.0; vx = 0.0; vy = 0.0;
+        if (Player == null) return false;
+        int id = Player.controlledRocket.Value;
+        if (id < 0 || id == excludingRocketId) return false;
+        if (syncedRockets == null || !syncedRockets.TryGetValue(id, out LocalRocket local)) return false;
+        if (local == null || local.rocket == null) return false;
+        Location loc = local.rocket.location.Value;
+        if (loc == null || loc.planet == null || loc.planet.codeName != planetCode) return false;
+        x = loc.position.x; y = loc.position.y;
+        vx = loc.velocity.x; vy = loc.velocity.y;
+        return true;
+    }
+
     public static void ClearUnmannedRocketsOnLaunchpad()
     {
         if (syncedRockets == null || syncedRockets.Count == 0) return;
@@ -379,7 +442,7 @@ public static class LocalManager
         for (int i = 0; i < doomed.Count; i++)
         {
             int id = doomed[i];
-            UnityEngine.Debug.Log($"[SFS-MP] 清理发射台上的无主火箭: id={id}");
+            UnityEngine.Debug.Log($"[SFS-MP] cleaning up an unowned rocket on the launchpad: id={id}");
             // 本地收尸：复用远端销毁的既有路径，同步表和插值器一起清干净
             DestroyLocalRocket(id);
             // 通知服务端，让别的客户端也把它删掉
@@ -402,7 +465,7 @@ public static class LocalManager
             if (Time.unscaledTime < pending.NextSendTime) continue;
             if (pending.Tries >= LaunchResendMaxTries)
             {
-                UnityEngine.Debug.LogWarning($"[SFS-MP] 发射/创建请求重发 {pending.Tries} 次仍无回执，放弃（localId={kv.Key}）。");
+                UnityEngine.Debug.LogWarning($"[SFS-MP] launch/create request resent {pending.Tries} times with no reply; giving up (localId={kv.Key}).");
                 // 放弃就必须收尸：否则这枚本地火箭既没同步也删不掉（三处补丁按未登记拦死），
                 // 变成"别人看不到、自己控制不了、物理也不跑"的幽灵 —— 用户看到的"完全没创建出来"。
                 AbandonUnsyncedRocket(kv.Key);
@@ -411,7 +474,7 @@ public static class LocalManager
             }
             pending.Tries++;
             pending.NextSendTime = Time.unscaledTime + LaunchResendIntervalSeconds;
-            UnityEngine.Debug.Log($"[SFS-MP] 创建请求未收到回执，重发第 {pending.Tries} 次（localId={kv.Key}）");
+            UnityEngine.Debug.Log($"[SFS-MP] no reply to the create request; resending (try {pending.Tries}, localId={kv.Key})");
             ClientManager.SendPacket(pending.Packet);
         }
         if (done != null)
@@ -426,7 +489,18 @@ public static class LocalManager
     // 节流到 0.1 秒一次：隔离效果无差别，主线程开销降到 1/6 以下。
     private static float nextCollisionIsolationTime;
 
-
+    // ===== 【2026-10-09 治"双方看到对方不同步"】=====
+    // 所有零件/模块通道（引擎开关、资源、分级、销毁零件）都是"只在变化时发一次"的增量，
+    // 而且发送都带权威守卫 —— 变化发生的那一刻如果我不是权威，这次变化就被静默丢弃，
+    // 谁都不会补发（全量重同步以前只在断流/换星球等异常时才触发）。
+    // **一次漏发 = 永久错下去** —— 这就是"老毛病：每次都是双方看到对方不同步"。
+    //
+    // 修法：对**附近**的远端火箭定期要一次完整快照，配合 OnPacket_CreateRocket 里的结构指纹，
+    // 把"永久错误"降级成"最多错几秒"。只做 10 公里内 —— 远处的看不见、不值得花流量，
+    // 而且 10 公里正好是服务端 P2P 撮合的 proximity 默认阈值。
+    private const float NearbySnapshotIntervalSeconds = 8f;
+    private const double NearbySnapshotRangeMeters = 10000.0;
+    private static float nextNearbySnapshotTime;
 
     public static void Update()
     {
@@ -436,7 +510,7 @@ public static class LocalManager
         // 发射加载屏兜底：超过 5 秒没等到服务端回执就关掉，避免整屏遮挡
         if (launchRequestTime > 0f && Time.unscaledTime - launchRequestTime >= LaunchTimeoutSeconds)
         {
-            UnityEngine.Debug.LogWarning("[SFS-MP] 发射请求 5 秒未收到服务端回执，强制关闭加载屏（火箭仍会在回执到达后建出）。");
+            UnityEngine.Debug.LogWarning("[SFS-MP] no reply to the launch request after 5s; forcing the loading screen closed (the rocket still spawns once the reply arrives).");
             CloseLaunchLoadingScreen();
         }
 
@@ -446,11 +520,12 @@ public static class LocalManager
         // 控制请求超时重发：Pending 卡死会让那枚火箭永久接不进控制权
         ClientManager.RetryPendingControlRequest();
 
-        // 加入流程的加载屏兜底：超时未进世界就强制关掉（避免整屏永久遮挡）
+        // 加入流程的加载屏兜底：超时未进世界 -> 留在加载屏上自动重试世界进入。
+        // 【不要再改回"强制关屏"】那会把"卡在加载屏"（看得见、玩家会重试）变成
+        // "进去了但世界完全不更新"（看不见、玩家只能重启）—— 这个坑踩过很多次。
         if (worldLoadingStartedTime > 0f && Time.unscaledTime - worldLoadingStartedTime >= WorldLoadingTimeoutSeconds)
         {
-            UnityEngine.Debug.LogWarning("[SFS-MP] 进入世界超时，强制关闭加载屏。");
-            CloseWorldLoadingScreen();
+            ClientManager.OnWorldEntryTimedOut();
         }
 
         // 内存保护：清理过期/无效条目。每秒一次即可 —— 内部有 LINQ 分配（HashSet/ToList），
@@ -467,6 +542,16 @@ public static class LocalManager
             nextCollisionIsolationTime = Time.unscaledTime + 0.1f;
             UpdateLaunchpadCollisionIsolation();
         }
+
+        // 附近火箭的定期全量重同步（见字段处的说明）
+        if (Time.unscaledTime >= nextNearbySnapshotTime)
+        {
+            nextNearbySnapshotTime = Time.unscaledTime + NearbySnapshotIntervalSeconds;
+            RequestNearbyRocketSnapshots();
+        }
+        TickForcedRebuild();
+        if (TraceSink.FrameObserver == null) TraceSink.FrameObserver = DebugTrace.Frame;
+        DebugTrace.Tick();
 
         // 重试 prefab 未就绪时缓存的 CreateRocket 包。必须限流：重试要解析 Rocket prefab
         // （FindObjectOfType + FindObjectsOfTypeAll 全场景扫描），每帧重试会把主线程卡死。
@@ -502,7 +587,7 @@ public static class LocalManager
                     {
                         pendingCreateRockets.Remove(retryRocketId);
                         pendingCreateAttempts.Remove(retryRocketId);
-                        UnityEngine.Debug.LogError($"[SFS-MP] 火箭 GlobalId={retryRocketId} 连续 {attempts} 次创建失败，已放弃重试（避免每秒整枚 Instantiate 卡死主线程）。");
+                        UnityEngine.Debug.LogError($"[SFS-MP] rocket GlobalId={retryRocketId} failed to create {attempts} times in a row; giving up (avoids instantiating a whole rocket every second and blocking the main thread).");
                     }
                     else
                     {
@@ -774,6 +859,19 @@ public static class LocalManager
             var toRemove = unsyncedRockets.Keys.Take(unsyncedRockets.Count - MaxTrackedRockets).ToList();
             foreach (var k in toRemove) unsyncedRockets.Remove(k);
         }
+
+        // 【任务 #9】兜底清理：任何销毁路径漏掉的空条目最多留 1 秒。
+        // Unity 的 Object.Destroy 延迟到帧末生效，所以销毁当帧的 Postfix 可能还看不到 null；
+        // 这一轮每秒扫描保证 DeadPartCount 长期为 0、字典不会随时间缓慢增长。
+        // 只删 null 条目，所以 LivePartCount / idSetMismatch / ToState 的结果都不变。
+        foreach (var kvp in syncedRockets)
+        {
+            PruneRocketParts(kvp.Value, kvp.Key);
+        }
+        foreach (var kvp in unsyncedRockets)
+        {
+            PruneRocketParts(kvp.Value, kvp.Key);
+        }
     }
 
     public static void DisableUpdateTimer()
@@ -882,12 +980,19 @@ public static class LocalManager
                 }
             }
             int interval = RocketSyncPolicy.GetIntervalMilliseconds(controlled, moving, adaptive);
-            if (lastRocketStateSend.TryGetValue(item2, out DateTime lastSend) &&
-                (now - lastSend).TotalMilliseconds < interval)
+            if (lastRocketStateSend.TryGetValue(item2, out DateTime lastSend))
             {
-                continue;
+                if ((now - lastSend).TotalMilliseconds < interval) continue;
+                lastRocketStateSend[item2] = now;
             }
-            lastRocketStateSend[item2] = now;
+            else
+            {
+                // 首包：基准取"当前时刻往回退一个相位"，而不是直接 now。
+                // 否则进场那一帧所有火箭的基准都等于同一时刻，相位永久对齐，
+                // 之后每隔 interval 全体挤在同一帧发包（见 RocketSyncPolicy.PhaseOffsetMilliseconds）。
+                lastRocketStateSend[item2] = now.AddMilliseconds(
+                    -RocketSyncPolicy.PhaseOffsetMilliseconds(item2, interval));
+            }
             Packet_UpdateRocketPrimary packet = rocket.ToUpdatePacketPrimary(item2);
             if (ClientManager.world.rockets.TryGetValue(item2, out var value))
             {
@@ -922,13 +1027,102 @@ public static class LocalManager
             }
         }
 
-        // 清理过期的 rocketId
+        // 清理过期的 rocketId。
+        // 【不要动 updateAuthority】它代表"服务端认为本端该为哪几枚火箭负责"，是服务端的裁决结果；
+        // 本端顺手 Remove 掉等于自己把权威信息删了 —— 这枚火箭随后被建出来时（创建回执晚到、
+        // 快照重发等），本端已经不再认为该由自己更新它，于是【永久不再发它的状态】：
+        // 现场表现就是"自己的火箭突然定住 / 操作没反应 / 拆件拆不掉"，直到服务端下一次下发权威
+        // 才可能恢复。服务端每次下发都是整份替换（ClientManager.cs 的 OnPacket_UpdatePlayerAuthority），
+        // 所以也不需要本端帮忙做垃圾回收。
+        // 这里只清两张按 rocketId 增长的辅助表。
         foreach (var id in staleRocketIds)
         {
-            updateAuthority.Remove(id);
             lastRocketStateSend.Remove(id);
             lastRocketInputSend.Remove(id);
         }
+    }
+
+    // ——— 强制整枚重建（"强制触发一次校验"）———
+    // 为什么必须有这条路：增量路径（DestroyPart / 结构包）只要漏一次，本地就永久多/少零件；
+    // 而快照到达后的"原地刷新"分支只刷位姿、**把零件数据丢掉**，所以快照本身拉不回结构。
+    // 唯一确定的修复动作就是"按权威状态整枚重建" —— 现在把它做成可强制、可重复的动作。
+    // 【为什么不用固定 8 秒窗口】窗口必须跟着"这一次快照请求"的生命周期走：
+    //  - 快照走服务端中继，与 P2P 有没有连上无关（P2P 不承载火箭数据）；
+    //  - 链路慢时 8 秒可能连第一枚都没到 -> 窗口空转关闭，用户以为点了没用；
+    //  - 链路快时也不该按时间收尾，而该按"这一批发完了"收尾。
+    // 所以：开着窗口等 -> 收到就重建并计数 -> 连续 1.5 秒没有新快照包视为发完 -> 收工；
+    // 兜底 60 秒硬超时，避免中途断流后窗口永远开着。
+    // 【不要按"空闲"收尾】慢链路上两个快照包之间可能超过 1 秒，空闲判据会让窗口在第一枚之后
+    // 就关掉，剩下的火箭永远等不到重建。正确做法是：
+    //   窗口一直开到 60 秒兜底为止；在此期间任何时刻到达的快照包都算；
+    //   用账本保证"每枚火箭本次点击只重建一次"，于是窗口开久也不会重复折腾。
+    private static bool forceRebuildWaiting;
+    private static int forcedRebuildCount;
+    private static float forcedRebuildStartTime;
+    private static string forcedRebuildResult = "-";
+    private static readonly HashSet<int> forcedRebuildDone = new HashSet<int>();
+    private const float ForcedRebuildTimeoutSeconds = 60f;
+
+    public static void ForceFullRebuild()
+    {
+        forceRebuildWaiting = true;
+        forcedRebuildCount = 0;
+        forcedRebuildDone.Clear();
+        forcedRebuildStartTime = Time.unscaledTime;
+        forcedRebuildResult = "waiting";
+        UnityEngine.Debug.Log("[SFS-MP] full rebuild window opened (waiting for world snapshot; valid for 60s)");
+    }
+
+    // 本次点击内，这枚火箭是否还需要强制重建；需要就当场记账（每枚只做一次）。
+    private static bool ForceRebuildWanted(int rocketId)
+    {
+        if (!forceRebuildWaiting) return false;
+        if (Time.unscaledTime - forcedRebuildStartTime > ForcedRebuildTimeoutSeconds) return false;
+        if (forcedRebuildDone.Contains(rocketId)) return false;
+        forcedRebuildDone.Add(rocketId);
+        return true;
+    }
+
+    // 给 F8 面板显示：等到了没、重建了几枚。以前这个动作是"静默"的，用户根本不知道有没有生效。
+    public static string ForcedRebuildStatus
+    {
+        get
+        {
+            if (!forceRebuildWaiting) return forcedRebuildResult;
+            if (forcedRebuildCount == 0) return "waiting for snapshot (up to 60s)";
+            return "rebuilding (" + forcedRebuildCount + " done)";
+        }
+    }
+
+    private static bool ForceRebuildActive()
+    {
+        return forceRebuildWaiting && Time.unscaledTime - forcedRebuildStartTime <= ForcedRebuildTimeoutSeconds;
+    }
+
+    // 由 Update() 每帧驱动收尾（不能只在收到包时判断：一枚都没到的情况下那条路根本不会被执行）。
+    private static void TickForcedRebuild()
+    {
+        if (!forceRebuildWaiting) return;
+        float now = Time.unscaledTime;
+        if (now - forcedRebuildStartTime <= ForcedRebuildTimeoutSeconds) return;
+        forceRebuildWaiting = false;
+        forcedRebuildResult = forcedRebuildCount > 0 ? ("done (" + forcedRebuildCount + ")") : "got no snapshot";
+        UnityEngine.Debug.Log($"[SFS-MP] full rebuild window closed by timeout; rebuilt={forcedRebuildCount}");
+        if (forcedRebuildCount == 0)
+        {
+            UnityEngine.Debug.LogWarning("[SFS-MP] full rebuild got no snapshot at all - is the server session healthy?");
+        }
+    }
+
+    // 结构探针的限流：每枚火箭 10 秒最多一行日志，避免刷屏（同时也不掩盖"每次快照都分叉"这种情况）。
+    private static readonly Dictionary<int, float> structureProbeNextTime = new Dictionary<int, float>();
+
+    private static bool NextStructureProbeTime(int rocketId)
+    {
+        float now = Time.unscaledTime;
+        if (structureProbeNextTime.TryGetValue(rocketId, out float next) && now < next) return false;
+        structureProbeNextTime[rocketId] = now + 10f;
+        return true;
     }
 
     public static int GetSyncedRocketID(Rocket rocket)
@@ -982,10 +1176,51 @@ public static class LocalManager
         return -1;
     }
 
+    // 【任务 #9】清掉某枚火箭已摧毁零件留下的空条目。原来 LocalRocket.PruneDestroyedParts() 是零调用的死代码。
+    // 调用时机必须在"该零件的 id 还可能被用到"之后：本地权威销毁的 DestroyPart 包在 Prefix 里已经发出，
+    // 远端 DestroyPart 在 Interpolator 里已经应用（应用点最终会走到 WorldEventSyncing 的 Part.DestroyPart
+    // Postfix），所以两处都在销毁动作之后才清。只删 null 条目，不删活体。
+    // 返回值 = 本次清掉的数量；有变化才打诊断日志，避免刷屏。
+    private static int PruneRocketParts(LocalRocket localRocket, int rocketId)
+    {
+        if (localRocket == null || localRocket.parts == null) return 0;
+        int pruned = localRocket.PruneDestroyedParts();
+        if (pruned > 0)
+        {
+            UnityEngine.Debug.Log("[SFS-MP][prune] rocket " + rocketId + " pruned=" + pruned + " live=" + localRocket.LivePartCount());
+        }
+        return pruned;
+    }
+
+    // 供销毁路径直接调用（WorldEventSyncing.Part_DestroyPart 的 Postfix）：先按"已同步"找，
+    // 找不到再按"未同步"找；两处都没有登记就什么都不做。
+    public static void PruneDestroyedPartsFor(Rocket rocket)
+    {
+        if (rocket == null) return;
+        int syncedId = GetSyncedRocketID(rocket);
+        if (syncedId >= 0)
+        {
+            if (syncedRockets != null && syncedRockets.TryGetValue(syncedId, out LocalRocket synced))
+            {
+                PruneRocketParts(synced, syncedId);
+            }
+            return;
+        }
+        int unsyncedId = GetUnsyncedRocketID(rocket);
+        if (unsyncedId >= 0 && unsyncedRockets != null && unsyncedRockets.TryGetValue(unsyncedId, out LocalRocket unsynced))
+        {
+            PruneRocketParts(unsynced, unsyncedId);
+        }
+    }
+
     public static Packet_UpdateRocketPrimary ToUpdatePacketPrimary(this Rocket rocket, int id)
     {
+        // 结构哈希在包构造处统一填：以前只有一个发送路径填，其它路径发出去是 0，
+        // 观测端对账永远不触发（实测 hash mismatch = 0，而结构明明在分叉）。
+        uint structureHash = StructureSync.HashForWire(id);
         return new Packet_UpdateRocketPrimary
         {
+            StructureHash = structureHash,
             WorldTime = ClientManager.world.WorldTime,
             RocketId = id,
             Location = rocket.location.Value.ToNetLocation(),
@@ -1015,7 +1250,7 @@ public static class LocalManager
         Rocket prefab = RocketPrefab;
         if (prefab == null)
         {
-            UnityEngine.Debug.Log($"[SFS-MP] SpawnLocalRocket: prefab 为 null，返回 null（由 OnPacket_CreateRocket 缓存重试）");
+            UnityEngine.Debug.Log($"[SFS-MP] SpawnLocalRocket: prefab is null, returning null (OnPacket_CreateRocket caches and retries)");
             return null;
         }
         UnityEngine.Debug.Log($"[SFS-MP] SpawnLocalRocket: Instantiate prefab={prefab.GetInstanceID()}, GlobalId={globalId}");
@@ -1039,7 +1274,7 @@ public static class LocalManager
             // 造出一枚缺零件的半成品火箭并放进世界 → 游戏侧每物理步 NRE + 崩溃上报 → 窗口"未响应"。
             if (value == null)
             {
-                UnityEngine.Debug.LogError($"[SFS-MP] 火箭 GlobalId={globalId} 含本机缺失的零件（{part3.Value.part}），放弃创建并销毁实例。");
+                UnityEngine.Debug.LogError($"[SFS-MP] rocket GlobalId={globalId} contains a part that is missing locally ({part3.Value.part}); aborting creation and destroying the instance.");
                 UnityEngine.Object.Destroy(rocket.gameObject);
                 return null;
             }
@@ -1057,7 +1292,13 @@ public static class LocalManager
         }
         rocket.SetJointGroup(new JointGroup(list, parts.Values.ToList()));
         rocket.rb2d.transform.eulerAngles = new Vector3(0f, 0f, state.rotation);
-        rocket.physics.SetLocationAndState(state.location.ToVanillaLocation(), physicsMode: true);
+        // 【必须钳地形】以前这里直接写未钳制的坐标：位置本来就落在地表以下时，
+        // 刚体带着"埋在地里"的状态建出来；玩家一接管、物理一解冻，碰撞求解器就把它猛地弹上天
+        //（现场表现："地图显示在地下，一接入控制权就跑到天上去"）。
+        // ClampBelowTerrain 返回 null = 地形还没就绪，这时只能先用原值（火箭总得有个出生位置），
+        // 之后插值帧会正常钳制。
+        Location spawnLocation = state.location.ToVanillaLocation();
+        rocket.physics.SetLocationAndState(Interpolator.ClampBelowTerrain(spawnLocation) ?? spawnLocation, physicsMode: true);
         rocket.rb2d.angularVelocity = state.angularVelocity;
         foreach (StageState stage in state.stages)
         {
@@ -1073,7 +1314,7 @@ public static class LocalManager
         catch (System.Exception ex)
         {
             // 任何异常都不允许留下半成品火箭进世界
-            UnityEngine.Debug.LogError($"[SFS-MP] 火箭 GlobalId={globalId} 创建失败：{ex}");
+            UnityEngine.Debug.LogError($"[SFS-MP] rocket GlobalId={globalId} creation failed: {ex}");
             if (rocket != null && rocket.gameObject != null) UnityEngine.Object.Destroy(rocket.gameObject);
             return null;
         }
@@ -1114,6 +1355,102 @@ public static class LocalManager
         return set;
     }
 
+    // 航天发射中心场景加载后：把 world.rockets 里还没有活实例的火箭补建出来。
+    //
+    // 为什么需要它：蓝图编辑器（Build_PC）是**独立场景**，进编辑器时发射中心的场景被卸载、
+    // 所有火箭实例随之销毁；而我们在编辑器里又**故意不建**别人的火箭（见 OnPacket_CreateRocket）。
+    // 所以回到发射中心必须补一次，否则玩家会发现"一个人都看不到"。
+    //
+    // 用本地缓存的状态直接建（不发快照请求）：与 OnLoadWorld 同思路，省一次往返；
+    // 已有活实例的一律跳过 —— 无条件重建会把整枚火箭重新 Instantiate，造成数百毫秒卡顿。
+    /// <summary>
+    /// 对附近（同星球、10 公里内）的远端火箭请求一次完整快照。
+    /// 目的见字段处说明：把"漏一次就永久错"的增量同步降级成"最多错几秒"。
+    /// 只按你自己的位置算距离 —— 你自己的火箭是本地模拟的，位置精确且零延迟。
+    /// </summary>
+    private static void RequestNearbyRocketSnapshots()
+    {
+        if (!ClientManager.multiplayerEnabled.Value) return;
+        if (ClientManager.client == null || !ClientManager.client.Connected) return;
+        if (ClientManager.world == null) return;
+        if (Player == null) return;
+        int ownId = Player.controlledRocket.Value;
+        if (ownId < 0) return;
+        if (syncedRockets == null || !syncedRockets.TryGetValue(ownId, out LocalRocket own)) return;
+        if (own == null || own.rocket == null) return;
+        Location ownLoc = own.rocket.location.Value;
+        if (ownLoc == null || ownLoc.planet == null) return;
+
+        double limitSq = NearbySnapshotRangeMeters * NearbySnapshotRangeMeters;
+        foreach (KeyValuePair<int, LocalRocket> kvp in syncedRockets)
+        {
+            if (kvp.Key == ownId) continue;
+            LocalRocket other = kvp.Value;
+            if (other == null || other.rocket == null) continue;
+            Location loc = other.rocket.location.Value;
+            if (loc == null || loc.planet != ownLoc.planet) continue;
+            double dx = loc.position.x - ownLoc.position.x;
+            double dy = loc.position.y - ownLoc.position.y;
+            if (dx * dx + dy * dy > limitSq) continue;
+            ClientManager.RequestRocketSnapshot(kvp.Key);
+        }
+    }
+
+    /// <summary>
+    /// 唤醒一枚火箭的插值器。为什么必须有它（2026-10-10 根因）：
+    /// Interpolator.Update() 第一行是 if (currentUpdate == null) return; —— 而 Path A/B/C
+    /// 各自抄了一遍初始化，OnLoadWorld 与 RebuildMissingRockets 这两条路漏了 ✗。
+    /// 漏掉的后果：世界加载时就存在的火箭（含重连、从蓝图编辑器回来）永久僵住，
+    /// 位置包只进 updateBuffer 无人消费，唯一能唤醒它的是"整枚重建"——这就是
+    /// "撞坏一个零件才同步"的真正原因。抽成一个方法，防止再有人加 spawn 路径时漏掉。
+    /// </summary>
+    public static void PrimeInterpolator(LocalRocket localRocket, int globalId)
+    {
+        if (localRocket == null || localRocket.interpolator == null || localRocket.rocket == null) return;
+        localRocket.interpolator.updateBuffer.Clear();
+        localRocket.interpolator.packetBuffer.Clear();
+        localRocket.interpolator.currentUpdate = localRocket.rocket.ToUpdatePacketPrimary(globalId);
+        if (localRocket.interpolator.currentUpdate != null)
+        {
+            localRocket.interpolator.currentUpdate.WorldTime = 0.0;
+        }
+        localRocket.interpolator.isNewlyCreated = true;   // 首包硬对齐，否则又要"慢慢追"
+    }
+
+    public static void RebuildMissingRockets()
+    {
+        if (!ClientManager.multiplayerEnabled.Value) return;
+        if (ClientManager.world == null) return;
+        foreach (KeyValuePair<int, RocketState> rocket in ClientManager.world.rockets)
+        {
+            if (syncedRockets.TryGetValue(rocket.Key, out LocalRocket existing)
+                && existing != null && existing.rocket != null)
+            {
+                continue;
+            }
+            DestroyLocalRocket(rocket.Key);
+            LocalRocket spawned = SpawnLocalRocket(rocket.Value, rocket.Key);
+            if (spawned != null)
+            {
+                // 【死插值器修复 2026-10-10】这里以前不初始化插值器：currentUpdate 恒为 null
+                // -> Interpolator.Update() 第一行就 return -> 状态包全塞进 updateBuffer 没人消费
+                // -> 这枚火箭永久僵住，只有"整枚重建"（撞掉零件）才能唤醒它。
+                PrimeInterpolator(spawned, rocket.Key);
+                continue;
+            }
+            if (spawned == null)
+            {
+                // prefab 未就绪等：登记重发（与 OnLoadWorld 同款兜底）
+                pendingCreateRockets[rocket.Key] = new Packet_CreateRocket
+                {
+                    WorldTime = ClientManager.world.WorldTime,
+                    GlobalId = rocket.Key,
+                    Rocket = rocket.Value
+                };
+            }
+        }
+    }
+
     public static void OnLoadWorld()
     {
         unsyncedRockets.Clear();
@@ -1135,10 +1472,10 @@ public static class LocalManager
             // 这里绝不能抛异常：异常发生在场景加载回调栈里、TryConnect 的 try 之外 ——
             // 会让后续初始化（相机/地图/玩家/其余火箭）全部跳过，而加载屏没人关，
             // 表现就是"进入世界被永久遮挡 + 该同步的火箭缺失"。改为排队重试。
-            LocalRocket value = SpawnLocalRocket(rocket.Value);
+            LocalRocket value = SpawnLocalRocket(rocket.Value, rocket.Key);
             if (value == null)
             {
-                UnityEngine.Debug.Log($"[SFS-MP] OnLoadWorld: prefab 未就绪，GlobalId={rocket.Key} 排队重试");
+                UnityEngine.Debug.Log($"[SFS-MP] OnLoadWorld: prefab not ready, queued for retry GlobalId={rocket.Key}");
                 pendingCreateRockets[rocket.Key] = new Packet_CreateRocket
                 {
                     WorldTime = ClientManager.world.WorldTime,
@@ -1148,6 +1485,9 @@ public static class LocalManager
                 continue;
             }
             syncedRockets[rocket.Key] = value;   // 索引器：上一会话残留同 id 时 Add 会抛重复键
+            // 【死插值器修复】OnLoadWorld 是"进服时世界里已有火箭"的必经之路，必须 prime，
+            // 否则这枚火箭的插值器永远不工作（症状：位置完全不动，撞掉零件才突然对齐）。
+            PrimeInterpolator(value, rocket.Key);
         }
         launchpadStateDirty = true;
     }
@@ -1175,17 +1515,115 @@ public static class LocalManager
         return pending;
     }
 
+    // 蓝图编辑器场景名（SFS 的建造界面）。
+    private const string BlueprintSceneName = "Build_PC";
+
+    private static bool IsBlueprintEditor()
+    {
+        return UnityEngine.SceneManagement.SceneManager.GetActiveScene().name == BlueprintSceneName;
+    }
+
     public static void OnPacket_CreateRocket(Packet_CreateRocket packet)
     {
+        // 【蓝图编辑器里不建别人的火箭】玩家在编辑器造东西时，别人发射的 CreateRocket
+        // 会在编辑器场景里直接 Instantiate 出来 —— 实测表现就是"有火箭冲进我的蓝图"。
+        //
+        // 只跳过"别人的"（广播过来的 LocalId 恒为 -1）；自己发起的创建回执（LocalId >= 0）
+        // 照常处理，否则"发射后自动接管"那条登记链会断。
+        //
+        // 跳过**不会丢状态**：火箭状态是在 ClientManager.OnPacket_CreateRocket 里先写进
+        // world.rockets、才转到本函数的。回到航天发射中心时由 RebuildMissingRockets 补建。
+        // 重试路径（pendingCreateRockets 的重发）也会走到本函数，所以同一道守卫同样覆盖它。
+        if (packet.LocalId < 0 && IsBlueprintEditor()) return;
+
         if (syncedRockets.TryGetValue(packet.GlobalId, out var existing))
         {
             // 已同步的火箭：这类包是"整枚状态覆盖"（客户端请求快照后服务端重发）。
             //   - 绝不能再销毁重建：75 部件 Instantiate 一次几百毫秒，重建又让插值更陈旧、
             //     触发下次快照请求 -> 自激循环（实测 fps=1、每帧 1.5 秒），
             //     而且重建期间火箭会瞬间消失（表现成"火箭变空气"）。
-            //   - 结构变化（部件被打掉）本来就由 DestroyPart 包负责，不靠这个包；
-            //     所以这里【只在物体真的丢了】才重建，其余一律原地按状态刷新。
-            bool needsRebuild = existing == null || existing.rocket == null || packet.Rocket == null;
+            //   - 结构变化（部件被打掉）本来由 DestroyPart 包负责，不靠这个包。
+            //     所以这里原本【只在物体真的丢了】才重建 —— 但下面新增的"结构指纹"补了一条：
+            //     零件数对不上也必须重建（那种情况下 DestroyPart 明显漏了，见下）。
+            // 【结构指纹 2026-10-09】零件数对不上 = 结构不同步（实测：part count 62 vs 61、
+            // 推力 480t vs 299.66t、燃料条也不一样）。
+            // 注意上面那条"已有实例只原地刷位姿"的优化**会把快照里的零件数据丢掉** ——
+            // 所以结构不一致时必须重建，否则定期快照也救不回来。
+            // 正常情况下数量一致 → 不重建 → 不会有那几百毫秒的 Instantiate 卡顿。
+            // 【修正 2026-10-09】这里以前用 existing.parts.Count —— 那张字典会保留已摧毁零件的 null 条目，
+            // 于是本地永远比服务端"多"几个零件，每 8 秒就误判一次结构不同步并重建（实测日志 10 次全是 local>incoming）。
+            // 只数活体零件才是真正的结构差异。
+            int liveParts = (existing == null || existing.parts == null) ? -1 : existing.LivePartCount();
+            int deadParts = (existing == null || existing.parts == null) ? -1 : existing.DeadPartCount();
+            int incomingParts = (packet.Rocket == null || packet.Rocket.parts == null) ? -1 : packet.Rocket.parts.Count;
+            int wireParts = -1;
+            if (ClientManager.world != null && ClientManager.world.rockets.TryGetValue(packet.GlobalId, out RocketState wireState)
+                && wireState != null && wireState.parts != null)
+            {
+                wireParts = wireState.parts.Count;
+            }
+            // 【结构探针 2026-10-10】快照到达时把三张表一起打出来（每枚火箭 10 秒最多一行）：
+            //   live    = 场上活体部件数（玩家眼睛看到的）
+            //   dead    = 摧毁后留在字典里的空条目数（外发状态会过滤它，所以它只骗计数）
+            //   wire    = 本地权威模型 world.rockets[id].parts
+            //   incoming= 服务端刚发来的权威状态
+            // 只有 live / wire 与 incoming 不一致才是真分叉；dead 大只说明字典没清空。
+            if (NextStructureProbeTime(packet.GlobalId))
+            {
+                UnityEngine.Debug.Log($"[SFS-MP][structure] id={packet.GlobalId} live={liveParts} dead={deadParts} wire={wireParts} incoming={incomingParts}");
+            }
+            // 【编号集合判据 2026-10-10】子 agent 定位：拆解/分离是"换号不换数"——零件个数一样、ID 集合不同。
+            // 只比个数时这种情况永远不重建 -> hash mismatch 每 5 秒报一次、永远修不好（就是那个死循环）。
+            bool idSetMismatch = false;
+            if (existing != null && existing.parts != null && packet.Rocket != null && packet.Rocket.parts != null)
+            {
+                int liveIds = 0;
+                int matchedIds = 0;
+                foreach (KeyValuePair<int, Part> kv in existing.parts)
+                {
+                    if (kv.Value == null) continue;
+                    liveIds++;
+                    if (packet.Rocket.parts.ContainsKey(kv.Key)) matchedIds++;
+                }
+                idSetMismatch = matchedIds != liveIds || matchedIds != packet.Rocket.parts.Count;
+            }
+            bool structureMismatch = (liveParts >= 0 && incomingParts >= 0 && liveParts != incomingParts) || idSetMismatch;
+            if (idSetMismatch && !structureMismatch)
+            {
+                structureMismatch = true;
+            }
+            if (idSetMismatch)
+            {
+                UnityEngine.Debug.Log("[SFS-MP] structure id-set mismatch on rocket " + packet.GlobalId + " (same count, different ids); repairing.");
+            }
+            if (structureMismatch)
+            {
+                UnityEngine.Debug.Log($"[SFS-MP] structure mismatch on rocket {packet.GlobalId}: live={liveParts} incoming={incomingParts}; rebuilding to resync.");
+            }
+            // 【权威端方向修正 2026-10-10】如果这枚火箭的权威就是我们自己，正确动作不是"接受服务端那份"，
+            // 而是把自己的真实结构再推一次（服务端此前静默丢弃了我们的拆解结果 -> 分叉永久存在）。
+            if (structureMismatch && updateAuthority.Contains(packet.GlobalId)
+                && syncedRockets.TryGetValue(packet.GlobalId, out var ownRocket) && ownRocket != null && ownRocket.rocket != null)
+            {
+                ClientManager.SendPacket(new Packet_CreateRocket
+                {
+                    WorldTime = ClientManager.world != null ? ClientManager.world.WorldTime : double.NaN,
+                    LocalId = -1,
+                    GlobalId = packet.GlobalId,
+                    Rocket = ownRocket.ToState()
+                });
+                UnityEngine.Debug.Log("[SFS-MP] structure mismatch on own rocket " + packet.GlobalId + "; re-pushing local structure to server.");
+                return;
+            }
+            bool needsRebuild = existing == null || existing.rocket == null || packet.Rocket == null || structureMismatch;
+            // 强制窗口（F8「重同步世界」）：远端火箭一律整枚重建 —— 这是唯一能把零件数据真正拉回来的动作。
+            // 必须跳过"本端就是权威"的那枚，否则会拿服务端的旧副本覆盖自己正在模拟的火箭。
+            if (!needsRebuild && packet.LocalId < 0 && !updateAuthority.Contains(packet.GlobalId) && ForceRebuildWanted(packet.GlobalId))
+            {
+                needsRebuild = true;
+                forcedRebuildCount++;
+                UnityEngine.Debug.Log($"[SFS-MP] forced rebuild on rocket {packet.GlobalId} (full resync); live={liveParts} wire={wireParts} incoming={incomingParts}");
+            }
             if (!needsRebuild)
             {
                 // 原地刷新：把整枚状态当成一个普通状态包塞给插值器，平滑对齐（不闪、不消失）
@@ -1214,7 +1652,7 @@ public static class LocalManager
             LocalRocket localRocket = SpawnLocalRocket(packet.Rocket, packet.GlobalId);
             if (localRocket == null)
             {
-                UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (synced exists): SpawnLocalRocket 返回 null，缓存重试 GlobalId={packet.GlobalId}（第 {(pendingCreateAttempts.TryGetValue(packet.GlobalId, out var __attempts) ? __attempts : 0)} 次）");
+                UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (synced exists): SpawnLocalRocket returned null, caching for retry GlobalId={packet.GlobalId} (try {(pendingCreateAttempts.TryGetValue(packet.GlobalId, out var __attempts) ? __attempts : 0)})");
                 if (pendingCreateRockets.Count >= MaxPendingCreates)
                 {
                     var oldestKey = pendingCreateRockets.Keys.First();
@@ -1223,7 +1661,7 @@ public static class LocalManager
                 pendingCreateRockets[packet.GlobalId] = packet;
                 return;
             }
-            UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (synced exists): 成功建出 LocalRocket GlobalId={packet.GlobalId}");
+            UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (synced exists): created LocalRocket GlobalId={packet.GlobalId}");
             syncedRockets.Add(packet.GlobalId, localRocket);
             if (localRocket.interpolator != null)
             {
@@ -1269,7 +1707,7 @@ public static class LocalManager
             LocalRocket localRocket2 = SpawnLocalRocket(packet.Rocket, packet.GlobalId);
             if (localRocket2 == null)
             {
-                UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (new): prefab 未就绪，缓存 GlobalId={packet.GlobalId}");
+                UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (new): prefab not ready, caching GlobalId={packet.GlobalId}");
                 if (pendingCreateRockets.Count >= MaxPendingCreates)
                 {
                     var oldestKey = pendingCreateRockets.Keys.First();
@@ -1278,7 +1716,7 @@ public static class LocalManager
                 pendingCreateRockets[packet.GlobalId] = packet;
                 return;
             }
-            UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (new): 成功建出 LocalRocket GlobalId={packet.GlobalId}");
+            UnityEngine.Debug.Log($"[SFS-MP] OnPacket_CreateRocket (new): created LocalRocket GlobalId={packet.GlobalId}");
             syncedRockets[packet.GlobalId] = localRocket2;   // 索引器：残留同 id 时 Add 会抛重复键
             // 控制登记在这里也要兑现（Path B 可能因为 unsynced 条目已被清理而命中不了）
             if (packet.LocalId >= 0 && ConsumePendingControlLocalId(packet.LocalId))
@@ -1291,7 +1729,9 @@ public static class LocalManager
                 localRocket2.interpolator.packetBuffer.Clear();
                 localRocket2.interpolator.currentUpdate = localRocket2.rocket.ToUpdatePacketPrimary(packet.GlobalId);
                 localRocket2.interpolator.currentUpdate.WorldTime = 0.0; // 清零初始基准，避免建立瞬间的 WorldTime 偏高把所有后续包丢弃导致冻结
-                localRocket2.rocket.physics.SetLocationAndState(packet.Rocket.location.ToVanillaLocation(), physicsMode: true);
+                // 同 1066：这条路径同样绕过了地形钳制，等于把"埋在地里"的状态灌进动态刚体。
+                Location spawnLocation2 = packet.Rocket.location.ToVanillaLocation();
+                localRocket2.rocket.physics.SetLocationAndState(Interpolator.ClampBelowTerrain(spawnLocation2) ?? spawnLocation2, physicsMode: true);
                 localRocket2.rocket.rb2d.transform.eulerAngles = new Vector3(0f, 0f, packet.Rocket.rotation);
                 localRocket2.rocket.rb2d.angularVelocity = packet.Rocket.angularVelocity;
             }

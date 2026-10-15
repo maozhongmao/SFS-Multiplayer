@@ -1,0 +1,125 @@
+#!/bin/sh
+# SFS multiplayer: KCP server (UDP 9806) + mefrp tunnel client
+DIR=/opt/sfs
+[ -d "$DIR" ] || exit 0
+
+# 开机时 rcS 会直接跑一次 S99sfs start，S98sfs-watchdog 的循环也会立刻跑一次。
+# 两者并发过：服务端第二个实例 bind 失败退出（日志脏），mefrpc 第二个实例则
+# 永远卡在"隧道当前在线"，把 pidof/判活都搅乱。所以 start 必须串行化。
+LOCK=/var/lock/sfs-start.lock
+with_lock() {
+  mkdir -p /var/lock 2>/dev/null
+  exec 9>"$LOCK" || return 1
+  # 抢不到锁就本轮放弃；看门狗 30 秒后还有一次。
+  flock -n 9 || { exec 9>&-; return 1; }
+  return 0
+}
+
+wait_clock() {
+  i=0
+  while [ $i -lt 60 ]; do
+    y=$(date +%Y 2>/dev/null)
+    [ "${y:-0}" -ge 2024 ] && return 0
+    sleep 5; i=$((i+1))
+  done
+  return 1
+}
+
+start_server() {
+  if grep -q ':264E' /proc/net/udp 2>/dev/null; then return 0; fi  # 按端口判活：同名基准实例再也不会蒙住看门狗
+  cd "$DIR" || return 1
+  # 9>&- 很关键：不关掉的话子进程会继承锁的 fd，锁就永久不释放了
+  setsid ./sfs-server-kcp-arm --port 9806 --max-players 16 --state "/mnt/UDISK/sfs-data/state.json" >> "$DIR/server.log" 2>&1 <&- 9>&- &
+  sleep 1
+  echo "$(date '+%F %T') server pid=$(pidof sfs-server-kcp-arm)" >> "$DIR/init.log"
+}
+
+# ——— mefrpc 隧道：判活 + 熔断退避 ———
+# 【为什么不用"有没有 ESTABLISHED socket"判活】那是上一版的写法，而且它是这次事故的帮凶：
+# mefrpc 只在每 ~93 秒轮询一次配置 API，只有那一瞬间存在 ESTABLISHED 连接，
+# 于是看门狗每隔一分多钟就把活得好好的客户端杀掉重启；每次杀都在服务端留下一条
+# "在线"僵尸会话，下一次启动就永远卡在"隧道当前在线, 请尝试使用强制下线隧道功能"。
+# 现在只认日志里的真实结果：成功 = 出现"访问您的服务"。
+# 连续 2 次没成功就退避半小时 —— 节点整片炸了（no such host / 登录节点失败）的时候，
+# 重试既救不回来又白烧这块 88MB 的板子。
+FRP_OK_MARK='访问您的服务'
+FRP_START_MARK='=== watchdog 启动 mefrpc'
+FRP_STATE="$DIR/.frp.state"   # 一行三个数：fail_count launch_epoch next_ok_epoch
+FRP_GRACE=180                 # 启动后给 3 分钟把隧道建起来
+FRP_COOLDOWN=1800             # 连续 2 次失败后的退避时长
+
+frp_log() { echo "$(date '+%F %T') $*" >> "$DIR/init.log"; }
+
+frp_state_read() {
+  set -- $(cat "$FRP_STATE" 2>/dev/null || echo "0 0 0")
+  FRP_FAILS=${1:-0}; FRP_LAUNCH=${2:-0}; FRP_NEXTOK=${3:-0}
+}
+
+frp_state_write() { echo "$FRP_FAILS $FRP_LAUNCH $FRP_NEXTOK" > "$FRP_STATE"; }
+
+# 只看"最近一次看门狗启动"之后的日志段，避免拿历史成功记录冒充当前健康
+frp_last_section() {
+  awk -v mark="$FRP_START_MARK" 'index($0, mark)==1 {buf=""} {buf = buf $0 "\n"} END {printf "%s", buf}' \
+    "$DIR/mefrpc.log" 2>/dev/null
+}
+
+frp_healthy() {
+  grep -q "$FRP_START_MARK" "$DIR/mefrpc.log" 2>/dev/null || return 1
+  frp_last_section | grep -q "$FRP_OK_MARK"
+}
+
+start_frp() {
+  now=$(date +%s)
+  frp_state_read
+
+  # 退避期：什么都不试，顺手把只会空转轮询的客户端停掉
+  if [ "$now" -lt "$FRP_NEXTOK" ]; then
+    if pidof mefrpc >/dev/null 2>&1; then
+      killall mefrpc 2>/dev/null
+      frp_log "frp 退避中，已停客户端，约 $(( (FRP_NEXTOK - now) / 60 )) 分钟后重试"
+    fi
+    return 0
+  fi
+  if [ "$FRP_NEXTOK" -gt 0 ]; then
+    FRP_FAILS=0; FRP_NEXTOK=0; frp_state_write
+    frp_log "frp 退避结束，重新尝试"
+  fi
+
+  if pidof mefrpc >/dev/null 2>&1; then
+    if frp_healthy; then
+      [ "$FRP_FAILS" -ne 0 ] && { FRP_FAILS=0; frp_state_write; }
+      return 0
+    fi
+    [ $((now - FRP_LAUNCH)) -lt "$FRP_GRACE" ] && return 0   # 宽限期没到，别急着判失败
+    killall mefrpc 2>/dev/null
+    sleep 1
+  fi
+
+  # 到这里 = 这一轮没有可用隧道。先记账，够两次就熔断
+  if [ "$FRP_LAUNCH" -gt 0 ]; then
+    FRP_FAILS=$((FRP_FAILS + 1))
+    why=$(frp_last_section | grep -oE '隧道当前在线|no such host|登录节点失败|已停止' | head -1)
+    frp_log "frp 第 $FRP_FAILS 次失败（${why:-原因未识别}）"
+    if [ "$FRP_FAILS" -ge 2 ]; then
+      FRP_NEXTOK=$((now + FRP_COOLDOWN)); FRP_LAUNCH=0; frp_state_write
+      frp_log "frp 连续失败，熔断 $((FRP_COOLDOWN / 60)) 分钟；若是'隧道当前在线'，需去 MEFrp 面板强制下线隧道 196542"
+      return 0
+    fi
+  fi
+
+  cd "$DIR" || return 1
+  wait_clock || frp_log "WARN clock not synced"
+  echo "$FRP_START_MARK $(date '+%F %T') ===" >> "$DIR/mefrpc.log"
+  setsid sh "$DIR/start-mefrpc.sh" >> "$DIR/mefrpc.log" 2>&1 <&- 9>&- &
+  FRP_LAUNCH=$now
+  frp_state_write
+  sleep 2
+  frp_log "mefrpc pid=$(pidof mefrpc)"
+}
+
+case "$1" in
+  start) with_lock || exit 0; start_server; start_frp ;;
+  stop)  killall mefrpc 2>/dev/null; killall sfs-server-kcp-arm 2>/dev/null ;;
+  *)     echo "usage: $0 {start|stop}"; exit 1 ;;
+esac
+exit 0

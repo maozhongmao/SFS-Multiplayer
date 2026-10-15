@@ -1,0 +1,73 @@
+#!/bin/sh
+# SFS multiplayer: KCP server (UDP 9806) + mefrp tunnel client
+DIR=/opt/sfs
+[ -d "$DIR" ] || exit 0
+
+# 开机时 rcS 会直接跑一次 S99sfs start，S98sfs-watchdog 的循环也会立刻跑一次。
+# 两者并发过：服务端第二个实例 bind 失败退出（日志脏），mefrpc 第二个实例则
+# 永远卡在"隧道当前在线"，把 pidof/判活都搅乱。所以 start 必须串行化。
+LOCK=/var/lock/sfs-start.lock
+with_lock() {
+  mkdir -p /var/lock 2>/dev/null
+  exec 9>"$LOCK" || return 1
+  # 抢不到锁就本轮放弃；看门狗 30 秒后还有一次。
+  flock -n 9 || { exec 9>&-; return 1; }
+  return 0
+}
+
+wait_clock() {
+  i=0
+  while [ $i -lt 60 ]; do
+    y=$(date +%Y 2>/dev/null)
+    [ "${y:-0}" -ge 2024 ] && return 0
+    sleep 5; i=$((i+1))
+  done
+  return 1
+}
+
+start_server() {
+  if grep -q ':264E' /proc/net/udp 2>/dev/null; then return 0; fi  # 按端口判活：同名基准实例再也不会蒙住看门狗
+  cd "$DIR" || return 1
+  # 9>&- 很关键：不关掉的话子进程会继承锁的 fd，锁就永久不释放了
+  setsid ./sfs-server-kcp-arm --port 9806 --max-players 16 --state "/mnt/UDISK/sfs-data/state.json" >> "$DIR/server.log" 2>&1 <&- 9>&- &
+  sleep 1
+  echo "$(date '+%F %T') server pid=$(pidof sfs-server-kcp-arm)" >> "$DIR/init.log"
+}
+
+# mefrpc 开着 loginFailExit：登录失败会退出（可被重启救回）。
+# 但更糟的是"进程还在、socket 全没了"的僵死态，pidof 判活会被它永久挡住。
+# 所以判活要求至少一条 ESTABLISHED 的 TCP 连接。
+# busybox 的 ls 会把 socket:[123] 转义成 socket\[\[123\]\]，所以两种写法都吃下。
+frp_inodes() {
+  for pid in $(pidof mefrpc 2>/dev/null); do
+    ls -l /proc/$pid/fd 2>/dev/null
+  done | sed -n 's/.*socket.*\[\([0-9][0-9]*\)\].*/\1/p' | sort -u
+}
+
+frp_alive() {
+  inos=$(frp_inodes | tr '\n' ',')
+  [ -n "$inos" ] || return 1
+  up=$(awk -v want="$inos" '
+    BEGIN { n = split(want, a, ","); for (i = 1; i <= n; i++) if (a[i] != "") w[a[i]] = 1 }
+    $4 == "01" && ($10 in w) { print "up"; exit }
+  ' /proc/net/tcp /proc/net/tcp6)
+  [ "$up" = "up" ]
+}
+
+start_frp() {
+  frp_alive && return 0
+  cd "$DIR" || return 1
+  pidof mefrpc >/dev/null 2>&1 && killall mefrpc 2>/dev/null
+  sleep 1
+  wait_clock || echo "$(date '+%F %T') WARN clock not synced" >> "$DIR/init.log"
+  setsid sh "$DIR/start-mefrpc.sh" >> "$DIR/mefrpc.log" 2>&1 <&- 9>&- &
+  sleep 2
+  echo "$(date '+%F %T') mefrpc pid=$(pidof mefrpc)" >> "$DIR/init.log"
+}
+
+case "$1" in
+  start) with_lock || exit 0; start_server; start_frp ;;
+  stop)  killall mefrpc 2>/dev/null; killall sfs-server-kcp-arm 2>/dev/null ;;
+  *)     echo "usage: $0 {start|stop}"; exit 1 ;;
+esac
+exit 0

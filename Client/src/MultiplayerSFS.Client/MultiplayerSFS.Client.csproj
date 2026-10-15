@@ -6,8 +6,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <AssemblyName>SFS-Multiplayer-1.6-V1.2.4</AssemblyName>
-    <Version>1.2.4</Version>
+    <AssemblyName>SFS-Multiplayer-1.6-V1.4</AssemblyName>
+    <Version>1.4</Version>
     <RootNamespace>MultiplayerSFS</RootNamespace>
     <LangVersion>12.0</LangVersion>
     <Nullable>disable</Nullable>
@@ -20,11 +20,13 @@
     <GameVersion Condition="'$(GameVersion)' == ''">v16</GameVersion>
     <GameReferences>$(MSBuildProjectDirectory)\..\..\refs\$(GameVersion)</GameReferences>
     <DefineConstants Condition="'$(GameVersion)' == 'v15'">$(DefineConstants);SFS15</DefineConstants>
-    <AssemblyName Condition="'$(GameVersion)' == 'v15'">SFS-Multiplayer-1.5-V1.2.4</AssemblyName>
-    <AssemblyName Condition="'$(GameVersion)' != 'v15'">SFS-Multiplayer-1.6-V1.2.4</AssemblyName>
+    <!-- 产物目录：1.6 与 1.5 两个包都落到同一个 release 目录（不再双写到 artifacts/）。
+         注意：两个包共用同一个 OutputPath 时，MSBuild 的增量清理会把另一个删掉，
+         所以出双包必须「分别构建 -> 各自暂存 -> 再合并」。 -->
+    <AssemblyName Condition="'$(GameVersion)' == 'v15'">SFS-Multiplayer-1.5-V1.4</AssemblyName>
+    <AssemblyName Condition="'$(GameVersion)' != 'v15'">SFS-Multiplayer-1.6-V1.4</AssemblyName>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath Condition="'$(GameVersion)' == 'v15'">$(MSBuildProjectDirectory)\..\..\release-1.5-V1.2.4\</OutputPath>
-    <OutputPath Condition="'$(GameVersion)' != 'v15'">$(MSBuildProjectDirectory)\..\..\artifacts\V1.2.4\</OutputPath>
+    <OutputPath>$(MSBuildProjectDirectory)\..\..\release-V1.4\</OutputPath>
     <!-- 同目录下的 MultiplayerSFS.Common.Kcp 是独立工程，但它嵌在本工程目录内：
          默认源码通配会把它的 obj/**/*.cs（含自动生成的 AssemblyInfo）也编译进来，
          与本工程手写的 Properties/AssemblyInfo.cs 冲突（CS0579 特性重复）。

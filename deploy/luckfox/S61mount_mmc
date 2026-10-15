@@ -1,0 +1,67 @@
+#!/bin/sh
+#
+# S61mount_mmc - Mount the TF card data partition at /mnt/mmc
+#
+# Notes:
+#   - The stock kernel has CONFIG_SWAP=n, so no swap is configured here.
+#   - If the card is not detected at boot, the MMC controller is re-probed
+#     once (unbind/bind), which recovers a card that failed CRC init.
+#
+
+MMC_HOST_DEV="4020000.sdmmc"
+MMC_DEV="/dev/mmcblk0p2"
+MMC_MNT="/mnt/mmc"
+
+reprobe_mmc() {
+    [ -d /sys/bus/platform/drivers/sunxi-mmc ] || return 0
+    echo "$MMC_HOST_DEV" > /sys/bus/platform/drivers/sunxi-mmc/unbind 2>/dev/null
+    sleep 1
+    echo "$MMC_HOST_DEV" > /sys/bus/platform/drivers/sunxi-mmc/bind 2>/dev/null
+    sleep 3
+}
+
+wait_for_device() {
+    i=0
+    while [ ! -b "$MMC_DEV" ] && [ "$i" -lt 10 ]; do
+        sleep 1
+        i=$((i + 1))
+    done
+}
+
+case "$1" in
+    start)
+        wait_for_device
+        if [ ! -b "$MMC_DEV" ]; then
+            echo "S61mount_mmc: $MMC_DEV not present, re-probing controller"
+            reprobe_mmc
+            wait_for_device
+        fi
+
+        if [ ! -b "$MMC_DEV" ]; then
+            echo "S61mount_mmc: $MMC_DEV still missing, skipped"
+            exit 0
+        fi
+
+        mkdir -p "$MMC_MNT"
+
+        if grep -q " $MMC_MNT " /proc/mounts 2>/dev/null; then
+            echo "S61mount_mmc: $MMC_MNT already mounted"
+            exit 0
+        fi
+
+        if mount -t ext2 "$MMC_DEV" "$MMC_MNT"; then
+            echo "S61mount_mmc: mounted $MMC_DEV at $MMC_MNT"
+        else
+            echo "S61mount_mmc: mount failed for $MMC_DEV"
+        fi
+        ;;
+    stop)
+        umount "$MMC_MNT" 2>/dev/null
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+
+exit 0

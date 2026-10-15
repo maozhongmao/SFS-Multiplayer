@@ -1,0 +1,7 @@
+[cpp-server] listening on KCP (UDP) port 9807, max_players=16
+[cpp-server] 加入准入: 连接密码=未设置(任何人可进) 重名拦截=开 用户名长度上限=32 人数上限=16
+[cpp-server] P2P 信令: 启用 距离阈值=10000m 校验周期=1s 切换缓冲=10s
+[cpp-server] 存档已加载: 世界时间=30.001 难度=0 火箭=0 部件=0
+[cpp-server] port=9807 max_players=16 state=test-run/probe-verify.json p2p=on p2p_proximity=10000 password=off block_duplicate_names=on max_username_length=32
+[cpp-server] 输入 help 查看服务端命令，输入 stop 安全保存并退出。
+[cpp-server] +conn #1 conv=1515847681

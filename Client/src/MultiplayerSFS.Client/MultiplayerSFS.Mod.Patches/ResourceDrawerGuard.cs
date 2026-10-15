@@ -28,8 +28,8 @@ public static class ResourceDrawer_CheckRedraw
             if (!warned)
             {
                 warned = true;
-                Debug.LogWarning("[SFS-MP] 已抑制 ResourceDrawer 的资源条索引越界异常"
-                                 + "（游戏侧资源条缓存与联机部件变动不一致）；同类异常后续不再记录。");
+                Debug.LogWarning("[SFS-MP] suppressed a ResourceDrawer resource-bar index out-of-range exception"
+                                 + " (the game-side resource bar cache disagrees with multiplayer part changes); further occurrences are not logged.");
             }
             return null;
         }

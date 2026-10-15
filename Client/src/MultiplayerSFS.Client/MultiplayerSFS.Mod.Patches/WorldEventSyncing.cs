@@ -55,7 +55,7 @@ public class WorldEventSyncing
 			Menu.loading.Open("Sending launch request to server...");
 			// 记录发起时间：LocalManager 会在收到回执时关闭加载屏，超时也会兜底关闭
 			LocalManager.NotifyLaunchRequestSent();
-			UnityEngine.Debug.Log($"[SFS-MP] 发射请求：{rockets.Length} 枚火箭待上报（世界时间={ClientManager.world.WorldTime:F1}）");
+			UnityEngine.Debug.Log($"[SFS-MP] launch request: {rockets.Length} rocket(s) to report (worldTime={ClientManager.world.WorldTime:F1}）");
 			Dictionary<Rocket, int> dictionary = new Dictionary<Rocket, int>(rockets.Length);
 			foreach (Rocket rocket in rockets)
 			{
@@ -87,8 +87,11 @@ public class WorldEventSyncing
 	[HarmonyPatch(typeof(Part), "DestroyPart")]
 	public class Part_DestroyPart
 	{
-		public static bool Prefix(Part __instance, bool createExplosion, ref DestructionReason reason)
+		public static bool Prefix(Part __instance, bool createExplosion, ref DestructionReason reason, out Rocket __state)
 		{
+			// 【任务 #9】先把"零件所属的火箭"存进 Harmony 的 __state：Postfix 运行时零件可能已被
+			// Unity 延迟销毁，那时不能再依赖 __instance 去取 Rocket。
+			__state = __instance != null ? __instance.Rocket : null;
 			if ((bool)ClientManager.multiplayerEnabled && GameManager.main != null)
 			{
 				if (reason == (DestructionReason)4)
@@ -104,8 +107,17 @@ public class WorldEventSyncing
 				int localPartID = LocalManager.GetLocalPartID(syncedRocketID, __instance);
 				if (localPartID == -1)
 				{
-					Debug.LogError("Couldn't find destroyed part's id!");
-					return false;
+					// 【根因修复 2026-10-10】这里以前是 return false：查不到零件 ID 就把整次销毁**否决**掉。
+					// 后果是一条闭环（实测日志：19 次重建 + 4 条本错误）：
+					//   销毁被否决 -> 本地永久多留一个零件 -> 本地与权威模型分叉
+					//   -> 只能靠"整枚重建"兜底 -> 重建既修状态(同步)又重置插值器(抖动)
+					//   -> 于是用户看到"抖动与不同步同时出现"，且"要撞一下（零件炸）才同步"。
+					// 现在：不再否决 —— 游戏要求销毁就让它销毁（否则场上物体与权威模型必然对不上），
+					//      改为立刻向服务端要这枚火箭的权威状态，让权威模型说了算，而不是让本地瞎猜。
+					Debug.LogWarning("[SFS-MP] destroy part not mapped on rocket " + syncedRocketID
+						+ "; allowing the destruction and requesting an authoritative resync");
+					ClientManager.RequestRocketSnapshot(syncedRocketID);
+					return true;
 				}
 				LocalPlayer player = LocalManager.Player;
 				if (player == null)
@@ -114,10 +126,13 @@ public class WorldEventSyncing
 				}
 				bool flag = LocalManager.updateAuthority.Contains(syncedRocketID);
 				bool flag2 = player.controlledRocket.Value == syncedRocketID;
-				if (!flag || !flag2)
+				if (!flag)
 				{
 					return false;
 				}
+				// 修复 2026-10-10：原来这里是 !flag || !flag2 —— 即"我们是权威、但当前没在操控"的火箭，
+				// 零件被物理摧毁时【既不销毁也不上报】✗，对面因此永远多留一个零件
+				// （实测签名：反复出现 live = incoming + 1）。权威端必须如实上报。
 				if (flag)
 				{
 					ClientManager.world.rockets[syncedRocketID].RemovePart(localPartID);
@@ -134,6 +149,17 @@ public class WorldEventSyncing
 				return false;
 			}
 			return true;
+		}
+
+		// 【任务 #9】零件摧毁动作已完成（本地权威路径里 DestroyPart 包在 Prefix 已发出；
+		// 远端路径由 Interpolator 应用后调用本方法），此时该零件的 id 不再会被任何发包/映射使用，
+		// 清掉它留下的 null 条目是安全的，且只删 null、不删活体。
+		// 注意：Unity 的 Object.Destroy 延迟到帧末生效，当帧可能还看不到 null；
+		// LocalManager.CleanupStaleEntries 每秒的兜底扫描保证空条目长期不会堆积。
+		public static void Postfix(Rocket __state)
+		{
+			if (!(bool)ClientManager.multiplayerEnabled) return;
+			LocalManager.PruneDestroyedPartsFor(__state);
 		}
 	}
 
@@ -226,7 +252,10 @@ public class WorldEventSyncing
 			localRocket.parts.Clear();
 			foreach (Part item in rocket.partHolder.partsSet)
 			{
-				localRocket.parts.InsertNew(item);
+				// 【确定性 id】运行时新增的零件也用同一套编号
+				int newPartId = IDExtensions.DeterministicPartID(new PartSave(item));
+				while (localRocket.parts.ContainsKey(newPartId)) newPartId = newPartId == int.MaxValue ? 1 : newPartId + 1;
+				localRocket.parts.Add(newPartId, item);
 			}
 			RocketState rocketState = localRocket.ToState();
 			ClientManager.world.rockets[syncedRocketID] = rocketState;
@@ -236,6 +265,10 @@ public class WorldEventSyncing
 				GlobalId = syncedRocketID,
 				Rocket = rocketState
 			}, (NetDeliveryMethod)67);
+			// 【重做 2026-10-10】本地乐观改写之后立刻向服务端要一次权威快照：
+			// 服务端可能否决这次改写（例如权威已易主），那样本地就会永久分叉。
+			// 有了这一次对齐，客户端最多一个来回就收敛到权威结构。
+			ClientManager.RequestRocketSnapshot(syncedRocketID);
 			foreach (Rocket childRocket2 in childRockets)
 			{
 				LocalRocket localRocket2 = new LocalRocket(childRocket2);

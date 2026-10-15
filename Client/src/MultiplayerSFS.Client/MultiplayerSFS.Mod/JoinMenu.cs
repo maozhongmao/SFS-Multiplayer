@@ -6,6 +6,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using MultiplayerSFS.Common;
@@ -27,7 +28,13 @@ public class JoinMenu : BasicMenu
 	private static readonly int windowID = Builder.GetRandomID();
 	// 内容实高 = 输入区120 + 声明区(320+8+24=352) + 按钮90 + 两处间距40 + 内边距20 = 622，
 	// 加标题栏约 65 → 742 时底部留白与上一版(760/内容640)一致。要增减底部留白直接改这个数。
-	private static readonly Vector2Int windowSize = new Vector2Int(1000, 742);
+	// 【2026-10-06 底部 +12 像素】用户逐像素数出来"底部差 12 像素"，要求补上。
+	// 外层布局是 childAlignment: MiddleCenter —— 余量**上下对半分**（这点用户早先纠正过我：
+	// "不能直接减算"）。所以要让底部多 12px，得把窗口高度加 **24**：
+	// 底部 +12、顶部也 +12（整窗高 24px）。
+	// 若只想要"底部多 12、顶部不动"，改的就不是这个数，而是 CreateLayoutGroup 的
+	// padding 底边（+24 会把整块内容上移 12、底部多 12）。这里先按"整窗长高"处理。
+	private static readonly Vector2Int windowSize = new Vector2Int(1000, 766);
 	private const int ContentWidth = 940;
 	private const int RowGap = 20;
 	private const int LabelWidth = 300;
@@ -128,6 +135,11 @@ Published: August 16, 2026";
 	private Color defaultTextInputColor;
 	private TextInput input_endpoint;
 	private TextInput input_username;
+	// 密码行常驻显示。不做「服务端要密码才自动出现」那套：多一条隐现逻辑就多一处
+	// 不确定性（标志位没传到就不显示，玩家根本没法输密码），而服务端不要密码时留空即可。
+	// 密码只留在内存里，不写 PlayerPrefs —— 参考文档把口令列入禁止持久化的内容。
+	private Label label_password;
+	private TextInput input_password;
 	// 上次保存的地址原文（用户可能省略了端口），只用于回填输入框
 	private string endpointInputText;
 	// 探测循环上次解析过的输入框内容，用来避免每秒重复解析同一个地址
@@ -243,6 +255,16 @@ Published: August 16, 2026";
 			input_username.FieldColor = defaultTextInputColor;
 		});
 
+		// 密码行常驻。窗口尺寸不动：底部本来就留有余量，多这一行正好落在那块留白里，
+		// 不要再去压缩声明区 —— 那样留白还在、声明区反而变矮，布局就难看了。
+		// 密码不做 Trim：口令里的空格可能是有效字符。
+		label_password = Builder.CreateLabel(labelColumn, LabelWidth, RowHeight, 0, 0, "Password");
+		label_password.TextAlignment = TextAlignmentOptions.MidlineLeft;
+		input_password = Builder.CreateTextInput(inputColumn, InputWidth, RowHeight, 0, 0, joinInfo.password, delegate(string input)
+		{
+			input_password.Text = joinInfo.password = input;
+			input_password.FieldColor = defaultTextInputColor;
+		});
 		statementArea = Builder.CreateContainer(window);
 		statementArea.CreateLayoutGroup(SFS.UI.ModGUI.Type.Vertical, childAlignment: TextAnchor.MiddleCenter, spacing: 8f, padding: new RectOffset(0, 0, 0, 0), disableChildSizeControl: true);
 		// 接受状态并进声明窗标题（原来是窗上方单独一行，白占一截高度）。
@@ -288,6 +310,9 @@ Published: August 16, 2026";
 		public int HandshakeVersion;
 		public int ProtocolVersion;
 		public string ServerVersion = string.Empty;
+		// 版本帧尾部的可选 flags：bit0 = 服务端要求密码。旧服务端不发，读到就是 0。
+		public int Flags;
+		public bool PasswordRequired => (Flags & ServerVersionCodec.ServerPolicyFlagPasswordRequired) != 0;
 	}
 
 	private async Task PollServerStatusAsync(int generation)
@@ -333,15 +358,35 @@ Published: August 16, 2026";
 		}
 
 		joinAllowedByStatus = compatible;
-		// 状态行平时只有一行（高 24）；带拒绝原因时是两行，不放宽会把原因截掉
+		// 状态行平时只有一行（高 24）；带拒绝原因时是两行，不放宽会把原因截掉。
+		//
+		// 【底部为什么会差 12 像素】外层 window 的布局是 childAlignment: MiddleCenter ——
+		// 多出来的余量**上下对半分**。状态行从 24 变成 48 会让声明区高 24，
+		// 于是底部留白正好少 12。这就是"登录页底部差 12 像素"的来源（用户逐像素数出来的）。
+		//
+		// 根治办法：让「声明窗 + 状态行」这一段**总高恒定** —— 状态行长高多少，声明窗就矮多少
+		// （声明窗本来就可滚动，少 24px 不影响可读性）。这样底部留白永远是 25px，不再跳。
+		// 注意不能反过来改 windowSize：MiddleCenter 下改它 1px 只挪 0.5px，算不准。
 		if (statusLabel != null && statusLabel.gameObject != null)
-			statusLabel.Size = new Vector2(ContentWidth, reason == null ? StatusHeight : StatusHeight * 2);
+		{
+			int statusHeight = reason == null ? StatusHeight : StatusHeight * 2;
+			statusLabel.Size = new Vector2(ContentWidth, statusHeight);
+			if (statementWindow != null && statementWindow.gameObject != null)
+			{
+				statementWindow.Size = new Vector2(
+					ContentWidth, StatementExpandedHeight - (statusHeight - StatusHeight));
+			}
+		}
 		// 三组数据横向排一行：竖着摆三行会把窗口高度吃满，按钮被顶出可视区。
 		// 版本不匹配的原因（reason）仍另起一行，只在真出问题时占第二行。
-		statusLabel.Text = serverLine + "   " + clientLine + "   " + metricsLine
+		// 服务端在版本帧的 flags 里说明要不要密码时，只在状态行加一句提示 —— 不改布局。
+		statusLabel.Text = serverLine
+			+ (status.PasswordRequired ? "   Password: required" : string.Empty)
+			+ "   " + clientLine + "   " + metricsLine
 			+ (reason == null ? string.Empty : "\n" + reason);
 		RefreshJoinButton();
 	}
+
 
 	private void RefreshJoinButton()
 	{
@@ -365,6 +410,9 @@ Published: August 16, 2026";
 		client.Client.Bind(new IPEndPoint(
 			family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
 		MultiplayerSFS.Common.UdpSocketGuard.DisableConnReset(client);
+		// 探测也走同一套缓冲设置：登录页每秒一次探测，缓冲太小同样会被内核丢包。
+		client.Client.ReceiveBufferSize = 1 << 20;
+		client.Client.SendBufferSize = 1 << 20;
 		return client;
 	}
 
@@ -384,9 +432,8 @@ Published: August 16, 2026";
 			using (var cancellation = new System.Threading.CancellationTokenSource(3000))
 			using (var kcp = new KcpContext(conv, (data, _) => udp.Send(data, data.Length, new IPEndPoint(address, port))))
 			{
-				kcp.SetNoDelay(1, 20, 2, 1);
-				kcp.SetMtu(1400);
-				kcp.WndSize(128, 128);
+				// 预设集中在 Common/KcpTransportPresets（连接前探针也用同一套，避免各处参数漂移）。
+				MultiplayerSFS.Common.KcpTransportPresets.Apply(kcp, MultiplayerSFS.Common.KcpTransportPresets.Relay);
 				byte[] infoRequest = TcpFrameCodec.Encode(new TcpFrame(TcpFrameKind.ServerInfoRequest, 0, ServerInfoCodec.EncodeRequest(), 0));
 				byte[] versionRequest = TcpFrameCodec.Encode(new TcpFrame(TcpFrameKind.ServerVersionRequest, 0, ServerVersionCodec.EncodeRequest(), 0));
 				kcp.Send(infoRequest, 0, infoRequest.Length);
@@ -430,6 +477,7 @@ Published: August 16, 2026";
 								status.HandshakeVersion = version.HandshakeVersion;
 								status.ProtocolVersion = version.ProtocolVersion;
 								status.ServerVersion = version.ServerVersion;
+								status.Flags = version.Flags;
 							}
 						}
 					}
@@ -483,6 +531,12 @@ Published: August 16, 2026";
 		{
 			input_endpoint.FieldColor = defaultTextInputColor;
 			input_username.FieldColor = defaultTextInputColor;
+			// 密码同样直接取输入框当前值，不依赖 onChange 回调（回调可能落后一次输入）
+			if (input_password != null && input_password.gameObject != null)
+			{
+				input_password.FieldColor = defaultTextInputColor;
+				joinInfo.password = input_password.Text ?? string.Empty;
+			}
 
 			// 点 Join 就先落盘，不等校验和连接结果：地址能解析就存地址，用户名非空就存用户名。
 			// 以前是"地址+用户名都过关"才存 —— 用户名空着时新填的地址会丢，下次进菜单看到的是旧地址。
@@ -533,16 +587,47 @@ Published: August 16, 2026";
 		string text = input == null ? string.Empty : input.Trim();
 		if (text.Length == 0) return false;
 
-		// 端口可省：只写 IP 就用默认端口；写了端口（"1.2.3.4:1234"）就按写的算。
-		int separator = text.LastIndexOf(':');
-		bool portSpecified = separator >= 0;
+		// 连接串的三种写法都要认（IPv6 必须单独处理，见下）：
+		//   1.2.3.4:9806 / example.com:9806   域名或 IPv4 + 端口
+		//   1.2.3.4 / example.com             省略端口 -> 默认端口 + SRV 查询
+		//   [240e:3bd::6173]:9806             带方括号的 IPv6 + 端口（唯一无歧义的写法）
+		//   240e:3bd::6173                    裸 IPv6 字面量（默认端口）
+		//
+		// 【为什么必须特判】IPv6 字面量里全是冒号。按"最后一个冒号"切端口时，
+		// `240e:3bd:231:...:6173` 会被切成主机 `240e:3bd:231:...:5d0c` + 端口 `6173`
+		// —— 端口恰好合法，于是不报错，只是地址被切坏，最后表现为"地址无效"，很难查。
 		int port = DefaultPort;
+		bool portSpecified = false;
 		string host = text;
-		if (portSpecified)
+
+		if (text[0] == '[')
 		{
-			if (separator == text.Length - 1) return false;
-			if (!int.TryParse(text.Substring(separator + 1), out port) || port < 1 || port > 65535) return false;
-			host = text.Substring(0, separator).Trim();
+			int close = text.IndexOf(']');
+			if (close < 0) return false;
+			host = text.Substring(1, close - 1).Trim();
+			string rest = text.Substring(close + 1).Trim();
+			if (rest.Length > 0)
+			{
+				if (rest[0] != ':') return false;
+				if (!int.TryParse(rest.Substring(1), out port) || port < 1 || port > 65535) return false;
+				portSpecified = true;
+			}
+		}
+		else if (IPAddress.TryParse(text, out _))
+		{
+			// 整串就是一个地址（IPv4 或裸 IPv6）：不做端口切分。
+			host = text;
+		}
+		else
+		{
+			int separator = text.LastIndexOf(':');
+			portSpecified = separator >= 0;
+			if (portSpecified)
+			{
+				if (separator == text.Length - 1) return false;
+				if (!int.TryParse(text.Substring(separator + 1), out port) || port < 1 || port > 65535) return false;
+				host = text.Substring(0, separator).Trim();
+			}
 		}
 		IPAddress address = await TryParseAddress(host);
 		if (address == null) return false;
@@ -563,11 +648,58 @@ Published: August 16, 2026";
 		if (IPAddress.TryParse(input, out IPAddress address)) return address;
 		try
 		{
-			return (await Dns.GetHostAddressesAsync(input)).FirstOrDefault();
+			IPAddress[] all = await Dns.GetHostAddressesAsync(input);
+			if (all == null || all.Length == 0) return null;
+
+			// 域名可能同时有 A 和 AAAA，而 GetHostAddresses 的顺序没有保证。
+			// 本套部署是"域名只挂 AAAA 指向板子"，所以有可用的 IPv6 时优先走 IPv6；
+			// 但本机没有 IPv6 出口时优先它只会白等一个超时，所以那时退回 IPv4。
+			if (HasUsableIPv6())
+			{
+				foreach (IPAddress candidate in all)
+				{
+					if (candidate.AddressFamily != AddressFamily.InterNetworkV6) continue;
+					if (candidate.IsIPv6LinkLocal || candidate.IsIPv6SiteLocal) continue;
+					return candidate;
+				}
+			}
+			foreach (IPAddress candidate in all)
+			{
+				if (candidate.AddressFamily == AddressFamily.InterNetwork) return candidate;
+			}
+			return all[0];
 		}
 		catch
 		{
 			return null;
 		}
+	}
+
+	// 本机是否有"真能用"的 IPv6：存在一张已启用、非回环/非隧道网卡上的
+	// 非 link-local、非 site-local 的 IPv6 单播地址。
+	// 用它是为了避免"域名有 AAAA 但本机根本没 IPv6"时白等一整个连接超时。
+	private static bool HasUsableIPv6()
+	{
+		try
+		{
+			foreach (NetworkInterface ni in NetworkInterface.GetAllNetworkInterfaces())
+			{
+				if (ni.OperationalStatus != OperationalStatus.Up) continue;
+				if (ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+				if (ni.NetworkInterfaceType == NetworkInterfaceType.Tunnel) continue;
+				foreach (UnicastIPAddressInformation ua in ni.GetIPProperties().UnicastAddresses)
+				{
+					IPAddress a = ua.Address;
+					if (a.AddressFamily != AddressFamily.InterNetworkV6) continue;
+					if (a.IsIPv6LinkLocal || a.IsIPv6SiteLocal || IPAddress.IsLoopback(a)) continue;
+					return true;
+				}
+			}
+		}
+		catch
+		{
+			// 查网卡失败不该阻断连接：当作没有 IPv6，退回 IPv4。
+		}
+		return false;
 	}
 }

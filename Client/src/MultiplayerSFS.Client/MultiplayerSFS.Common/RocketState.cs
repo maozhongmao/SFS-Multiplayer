@@ -62,7 +62,12 @@ public class RocketState : INetData
 		for (int i = 0; i < save.parts.Length; i++)
 		{
 			PartState item = new PartState(save.parts[i]);
-			int value = parts.InsertNew(item);
+			// 【确定性 id 2026-10-10】不再用 Random.Next()：同一枚零件在任何客户端、任何一次重建上
+			// 都算出同一个编号。随机号会让 DestroyPart 的 PartId 到了对面变成另一个零件或不存在
+			// （实测：destroy part ... not found ×12，且结构分叉双向）。
+			int value = IDExtensions.DeterministicPartID(save.parts[i]);
+			while (parts.ContainsKey(value)) value = value == int.MaxValue ? 1 : value + 1;
+			parts.Add(value, item);
 			partIndexToID.Add(i, value);
 		}
 		joints = save.joints.Select((JointSave joint) => new JointState(joint, partIndexToID)).ToList();

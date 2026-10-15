@@ -1,0 +1,15 @@
+{
+  "SchemaVersion": 1,
+  "SavedAtUtc": "2026-09-18T00:00:00Z",
+  "World": {
+    "WorldTime": 12345.5,
+    "Difficulty": 2,
+    "Rockets": {
+      "100": {
+        "RocketName": "Alpha",
+        "Location": {"X": 1.0, "Y": 2.0, "Vx": 3.0, "Vy": 4.0, "Address": "Earth"},
+        "Rotation": 0.5,
+        "AngularVelocity": 0.25,
+        "ThrottleOn": true,
+        "ThrottlePercent": 0.75,
+        "R

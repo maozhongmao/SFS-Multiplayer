@@ -1,0 +1,41 @@
+{
+  "SchemaVersion": 99,
+  "SavedAtUtc": "2026-09-18T00:00:00Z",
+  "World": {
+    "WorldTime": 12345.5,
+    "Difficulty": 2,
+    "Rockets": {
+      "100": {
+        "RocketName": "Alpha",
+        "Location": {"X": 1.0, "Y": 2.0, "Vx": 3.0, "Vy": 4.0, "Address": "Earth"},
+        "Rotation": 0.5,
+        "AngularVelocity": 0.25,
+        "ThrottleOn": true,
+        "ThrottlePercent": 0.75,
+        "Rcs": true,
+        "Parts": {
+          "1": {"Name": "pod", "X": 0.0, "Y": 0.0, "OrientationX": 1.0, "OrientationY": 1.0,
+                "OrientationZ": 0.0, "Temperature": "-Infinity",
+                "NumberVariables": {}, "ToggleVariables": {}, "TextVariables": {}, "Burns": null},
+          "2": {"Name": "engine", "X": 2.0, "Y": 0.0, "OrientationX": 1.0, "OrientationY": 1.0,
+                "OrientationZ": 0.0, "Temperature": 300.0,
+                "NumberVariables": {}, "ToggleVariables": {}, "TextVariables": {}, "Burns": null}
+        },
+        "Joints": [{"PartA": 1, "PartB": 2}],
+        "Stages": [{"StageId": 0, "PartIds": [1, 2]}]
+      },
+      "200": {
+        "RocketName": "Beta",
+        "Location": {"X": 10.0, "Y": 20.0, "Vx": 0.0, "Vy": 0.0, "Address": "Moon"},
+        "Rotation": 0.0,
+        "AngularVelocity": 0.0,
+        "ThrottleOn": false,
+        "ThrottlePercent": 0.0,
+        "Rcs": false,
+        "Parts": {},
+        "Joints": [],
+        "Stages": []
+      }
+    }
+  }
+}

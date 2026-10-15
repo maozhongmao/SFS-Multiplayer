@@ -71,7 +71,7 @@ public class DivertBuildSavingAndLoading
 						}
 						catch (System.Exception ex)
 						{
-							System.Console.Error.WriteLine("[SFS-MP] 后台线程异常（蓝图存档）: " + ex);
+							System.Console.Error.WriteLine("[SFS-MP] background thread exception (blueprint save): " + ex);
 							// 同理：不回填结果，主线程会一直等这个 Data.result。
 							try
 							{

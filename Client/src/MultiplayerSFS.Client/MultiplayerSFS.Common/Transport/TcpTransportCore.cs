@@ -165,7 +165,7 @@ public sealed partial class TcpClientTransport : IDisposable
 
         if (address == null || IPAddress.Any.Equals(address) || IPAddress.IPv6Any.Equals(address))
         {
-            throw new ArgumentException("请输入服务器的实际 IP 地址，不能使用 0.0.0.0 或 ::。", nameof(address));
+            throw new ArgumentException("Enter the real IP address of the server; 0.0.0.0 and :: are not allowed.", nameof(address));
         }
 
         serverEndpoint = new IPEndPoint(address, port);
@@ -176,14 +176,22 @@ public sealed partial class TcpClientTransport : IDisposable
             address.AddressFamily == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any,
             0));
         UdpSocketGuard.DisableConnReset(udpSocket);   // 见 UdpSocketGuard：不关会被 ICMP 10054 掐死接收路径
+  // 扩大内核收发缓冲：默认值（Windows 64 KB / Linux 256 KB）在满速同步下会被内核丢包，
+  // 而内核丢掉的包对上层就是"丢包"，KCP 只能超时重传 —— 实测把 srtt 从 2ms 抬到近 1 秒，
+  // 最后服务端按 heartbeat timeout 把整条会话判死（"玩到一半突然卡顿"）。
+  // 服务端对称地在 ServerCpp/src/net/kcp_transport.cpp 里设同样的值。
+  udpSocket.Client.ReceiveBufferSize = 1 << 20;   // 1 MB
+  udpSocket.Client.SendBufferSize = 1 << 20;
         conv = NewRandomConv();
 
         cancellation = new CancellationTokenSource();
 
         kcpContext = new KcpContext(conv, OnKcpOutput);
-        kcpContext.SetNoDelay(1, 10, 2, 1);
-        kcpContext.SetMtu(1400);
-        kcpContext.WndSize(256, 512);
+        // 快速重传阈值（resend）= 0：只走超时重传。resend=2 会在抖动链路上把延迟抖动
+        // 误判成丢包并抢先重传，挤占本就拥塞的链路形成正反馈。本协议不靠重传保证送达：
+        // 丢掉的最新状态包由下一个状态包补上，位置偏差过大走 200 米硬同步。
+        // 必须与服务端一致（ServerCpp/src/net/kcp_transport.hpp 的 kFastResend）。
+        KcpTransportPresets.Apply(kcpContext, KcpTransportPresets.Relay);
 
         connected = true;
         Interlocked.Exchange(ref disconnectQueued, 0);
@@ -198,12 +206,12 @@ public sealed partial class TcpClientTransport : IDisposable
         kcpReceiveTask = Task.Run(() =>
         {
             try { KcpReceiveLoop(cancellation.Token); }
-            catch (System.Exception ex) { System.Console.Error.WriteLine("[SFS-MP] KCP 接收线程异常: " + ex); }
+            catch (System.Exception ex) { System.Console.Error.WriteLine("[SFS-MP] KCP receive thread exception: " + ex); }
         });
         kcpUpdateTask = Task.Run(() =>
         {
             try { KcpUpdateLoop(cancellation.Token); }
-            catch (System.Exception ex) { System.Console.Error.WriteLine("[SFS-MP] KCP 更新线程异常: " + ex); }
+            catch (System.Exception ex) { System.Console.Error.WriteLine("[SFS-MP] KCP update thread exception: " + ex); }
         });
 
         var helloPayload = SessionHandshakeCodec.EncodeHello(request);
@@ -639,7 +647,26 @@ public sealed partial class TcpClientTransport : IDisposable
 
     private void TrackPacketType(TcpFrame frame)
     {
-        if (frame == null || frame.Payload == null || frame.Payload.Length == 0) return;
+        if (frame == null) return;
+
+        // 协议层帧级追踪：只做一次委托调用，未开启超级调试时为 null（零开销）
+        if (TraceSink.FrameObserver != null)
+        {
+            TraceSink.FrameObserver(frame.Kind.ToString(), frame.PayloadBits, frame.Payload == null ? 0 : frame.Payload.Length);
+        }
+
+        // 只有业务包（Packet）才有"包类型"这回事。
+        // 【修的是什么】以前这里不看 Kind 就直接把 payload[0] 当类型，而心跳帧的 payload 是
+        // 8 字节的 .NET ticks 时间戳（服务端每 2 秒发一次，客户端也发）——
+        // 于是 F8 面板那行「最后业务包」会显示 Unknown(83) 这种用时间戳首字节凑出来的垃圾值，
+        // 而且数字一直在变。那不是错误，是标签和统计范围写错了。
+        // 修完之后如果还看到 Unknown(N)，那才是真信号：服务端发了一个客户端不认识的业务包类型。
+        if (frame.Kind != TcpFrameKind.Packet)
+        {
+            lock (statsLock) lastPacketType = frame.Kind.ToString();   // Ping / Pong / ...
+            return;
+        }
+        if (frame.Payload == null || frame.Payload.Length == 0) return;
         byte rawType = frame.Payload[0];
         lock (statsLock)
         {
