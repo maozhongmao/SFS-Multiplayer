@@ -1,15 +1,19 @@
-# ===== 构建产物 =====
+# 构建产物
 bin/
 obj/
 *.pdb
 *.user
 *.suo
 .vs/
+Client/artifacts/
+
+# ---- 以下为 beta 分支补充（主仓库原块保持原样，便于合并）----
+
+# 其余构建产物
 dist/
 artifacts/
 release/
 release-*/
-Client/artifacts/
 Client/release/
 Client/release-*/
 Server/*/release-*/
@@ -18,7 +22,7 @@ Server/dist/
 Server/artifacts/
 ServerCpp/build/
 
-# ===== 二进制/可执行（绝不入库）=====
+# 二进制/可执行
 *.exe
 *.dll
 *.so
@@ -27,16 +31,16 @@ ServerCpp/build/
 *.a
 *.zip
 
-# ===== 游戏本体参考程序集（版权物）=====
+# 游戏本体参考程序集（版权物）
 Client/refs/
 refs/
 
-# ===== 外部/第三方代码（许可证不同）=====
+# 外部/第三方代码（许可证不同）
 Spaceflight-Simulator-MultiplayerMod-main/
 Spaceflight-Simulator-MultiplayerMod-main*
 Client/upstream-archive/
 
-# ===== 反编译/归档参考资料 =====
+# 反编译/归档参考资料
 _quarantine/
 Client/analysis/
 Client/analysis-v1/
@@ -44,7 +48,7 @@ Client/verdix-archive/
 Client/docs/
 docs/sfs-1.6-development/
 
-# ===== 个人数据 =====
+# 个人数据
 .audit/
 Rollback-Mods/
 .trash/
@@ -52,7 +56,7 @@ Rollback-Mods/
 Player.log*
 *.dmp
 
-# ===== 工作目录 / 工具 / 临时目录（本会话教训：这些不是源码）=====
+# 工作目录 / 工具 / 临时目录
 .ackcheck/
 .hermes/
 .smoke-kcp/
@@ -62,16 +66,15 @@ wiki/
 smoketest/
 ServerCpp-backup-*/
 
-# ===== 根目录里不进仓库的文档（贴到 GitHub Release 正文）=====
+# 根目录里不进仓库的文档（贴到 GitHub Release 正文）
 CHANGELOG.md
 RELEASE-NOTES-V1.4.md
 RELEASE-NOTES-V1.3.5.md
 RELEASE-NOTES-V1.2.4.md
 LICENSE-MPL-2.0.txt
 SECURITY.md
-git-autosync.log
+git-autosync.log*
 
-# ===== 杂项 =====
+# 杂项
 NUL
 *.tmp
-git-autosync.log*

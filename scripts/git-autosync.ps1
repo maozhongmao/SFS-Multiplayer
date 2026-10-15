@@ -22,6 +22,15 @@ try {
     Set-Location $Repo
     if (-not (Test-Path '.git')) { Write-Log 'SKIP not a git repo'; exit 0 }
 
+    # Quarantine guard: beta also hosts pull requests merged from other forks.
+    # Never commit while the tree is on another branch, or in the middle of a merge/rebase --
+    # otherwise an auto commit could swallow somebody's review work-in-progress.
+    $branchNow = git rev-parse --abbrev-ref HEAD 2>&1
+    if ($branchNow -ne $Branch) { Write-Log ('SKIP current branch is ' + $branchNow + ', expected ' + $Branch); exit 0 }
+    if ((Test-Path '.git/MERGE_HEAD') -or (Test-Path '.git/rebase-merge') -or (Test-Path '.git/rebase-apply')) {
+        Write-Log 'SKIP merge/rebase in progress'; exit 0
+    }
+
     # 1) local changes only; nothing changed -> no network at all
     $porcelain = git status --porcelain 2>&1
     if (-not $porcelain) { Write-Log 'OK no changes, skipped (no network)'; exit 0 }
