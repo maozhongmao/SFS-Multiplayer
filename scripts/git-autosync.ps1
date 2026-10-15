@@ -1,12 +1,13 @@
 # scripts/git-autosync.ps1
-# Purpose: commit the latest source changes and push them to the beta branch.
-# Used by: logon trigger + every 30 minutes -> pre-release branch + offsite backup.
+# Purpose: commit changed source and push it to the beta branch (pre-release + offsite backup).
+# Triggers: logon + every 30 minutes (Windows Task Scheduler task SFS-Multiplayer-git-autosync).
 # NOTE: keep this file ASCII-only. PowerShell 5.1 reads .ps1 as ANSI when there is no BOM,
-#       and a non-ASCII comment has broken the parser here before (see build-release.ps1).
-# Behaviour:
-#   * only commits what .gitignore allows (game assemblies / saves / toolchains / build output stay out)
-#   * does nothing when there are no changes (no empty commits)
-#   * a failed push is logged only; it will not pop dialogs or retry in a loop
+#       and non-ASCII text has broken the parser here before (see build-release.ps1).
+#
+# Bandwidth rules (important):
+#   * no changes  -> exit before touching the network at all (zero bytes sent or received)
+#   * changes     -> git push sends only the objects the remote does not already have
+#   * push rejected (remote moved) -> fetch + rebase + retry once, then give up and log
 param(
     [string]$Repo = 'D:\SFS-Multiplayer',
     [string]$Branch = 'beta',
@@ -21,8 +22,9 @@ try {
     Set-Location $Repo
     if (-not (Test-Path '.git')) { Write-Log 'SKIP not a git repo'; exit 0 }
 
+    # 1) local changes only; nothing changed -> no network at all
     $porcelain = git status --porcelain 2>&1
-    if (-not $porcelain) { Write-Log 'OK no changes, skipped'; exit 0 }
+    if (-not $porcelain) { Write-Log 'OK no changes, skipped (no network)'; exit 0 }
 
     git add -A 2>&1 | Out-Null
     $staged = git diff --cached --name-only 2>&1
@@ -34,12 +36,29 @@ try {
     if ($LASTEXITCODE -ne 0) { Write-Log 'WARN commit failed'; exit 1 }
     Write-Log ('COMMIT ' + (git log --oneline -1))
 
+    # 2) push first: the normal case downloads nothing
     $push = git push origin $Branch 2>&1
+    $stats = ($push | Select-String -Pattern 'Total \d+' | Select-Object -First 1)
     if ($LASTEXITCODE -eq 0) {
-        Write-Log 'PUSH ok'
+        Write-Log ('PUSH ok' + ($(if ($stats) { ' [' + $stats.Line.Trim() + ']' } else { '' })))
+        exit 0
+    }
+
+    # 3) rejected -> fetch just this branch, rebase, retry once
+    Write-Log ('PUSH rejected; fetch + rebase: ' + (($push | Select-Object -Last 1)))
+    git fetch -q origin $Branch 2>&1 | Out-Null
+    git rebase -q "origin/$Branch" 2>&1 | Out-Null
+    if ((Test-Path '.git/rebase-merge') -or (Test-Path '.git/rebase-apply')) {
+        git rebase --abort 2>&1 | Out-Null
+        Write-Log 'PUSH FAILED rebase conflict; aborted, needs manual fix'
+        exit 1
+    }
+    $push2 = git push origin $Branch 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $stats2 = ($push2 | Select-String -Pattern 'Total \d+' | Select-Object -First 1)
+        Write-Log ('PUSH ok (after rebase)' + ($(if ($stats2) { ' [' + $stats2.Line.Trim() + ']' } else { '' })))
     } else {
-        Write-Log ('PUSH FAILED ' + (($push | Select-Object -Last 3) -join ' | '))
-        Write-Log 'HINT check credentials (docs/git-autosync.md)'
+        Write-Log ('PUSH FAILED ' + (($push2 | Select-Object -Last 2) -join ' | '))
     }
 } catch {
     Write-Log ('ERROR ' + $_.Exception.Message)
