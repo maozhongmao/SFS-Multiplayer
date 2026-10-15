@@ -10,7 +10,8 @@ Spaceflight Simulator 的实时多人联机项目。
 
 ## 项目组成
 
-- `Client/`：SFS 1.6 客户端模组源码。
+- `Client/`：客户端联机模组源码。
+- `Plugin/`：独立联机服务端插件。
 - `Server/`：独立联机服务端源码。
 - `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)。
 - `README.md`：本项目的 [README](README.md)。
