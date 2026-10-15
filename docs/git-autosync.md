@@ -72,3 +72,4 @@ Unregister-ScheduledTask -TaskName 'SFS-Multiplayer-git-autosync' -Confirm:$fals
 `Server/server.example.yml` / `LICENSE.md`（都已恢复）。
 
 推送只传远端缺失的对象；无变化时脚本在联网前就退出。
+带宽实测标记 20:27:19

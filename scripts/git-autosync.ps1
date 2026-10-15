@@ -38,9 +38,11 @@ try {
 
     # 2) push first: the normal case downloads nothing
     $push = git push origin $Branch 2>&1
-    $stats = ($push | Select-String -Pattern 'Total \d+' | Select-Object -First 1)
+    # record the push output verbatim (locale independent): it contains the object counts,
+    # e.g. "Total 3 (delta 1), reused 0" -- proof that only new objects travel.
+    $tail = ($push | Where-Object { $_ -match '\S' } | Select-Object -Last 2) -join ' | '
     if ($LASTEXITCODE -eq 0) {
-        Write-Log ('PUSH ok' + ($(if ($stats) { ' [' + $stats.Line.Trim() + ']' } else { '' })))
+        Write-Log ('PUSH ok [' + $tail + ']')
         exit 0
     }
 
@@ -55,8 +57,8 @@ try {
     }
     $push2 = git push origin $Branch 2>&1
     if ($LASTEXITCODE -eq 0) {
-        $stats2 = ($push2 | Select-String -Pattern 'Total \d+' | Select-Object -First 1)
-        Write-Log ('PUSH ok (after rebase)' + ($(if ($stats2) { ' [' + $stats2.Line.Trim() + ']' } else { '' })))
+        $tail2 = ($push2 | Where-Object { $_ -match '\S' } | Select-Object -Last 2) -join ' | '
+        Write-Log ('PUSH ok (after rebase) [' + $tail2 + ']')
     } else {
         Write-Log ('PUSH FAILED ' + (($push2 | Select-Object -Last 2) -join ' | '))
     }
