@@ -15,7 +15,8 @@
 # and one non-ASCII comment has broken the parser here before.
 
 $ErrorActionPreference = "Stop"
-$root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+# 脚本在 Server/cpp/ 下：上三级才是仓库根（Server\cpp -> Server -> 仓库根）
+$root = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path))
 $zig = Join-Path $root "tools\zig-x86_64-windows-0.16.0\zig.exe"
 $src = Join-Path $root "Server\cpp\src"
 $outDir = Join-Path $root "Server\cpp\build\exp-armv7"
