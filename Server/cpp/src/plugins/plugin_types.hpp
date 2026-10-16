@@ -27,6 +27,19 @@ enum Capability : std::uint32_t {
     kCapSendMessage = 1u << 2,  // sfs.sendMessage(playerId, text)
     kCapLog         = 1u << 3,  // sfs.log(text)
 };
+struct RocketView;  // 前置声明：HostApi 只用它的指针（完整定义在 plugin_events.hpp）
+
+// 宿主 API 表: 交给引擎绑定层的一组 C 函数指针。ctx 是"每个插件一份"的
+// 绑定对象, 能力位绑在它上面 —— 插件 A 拿不到插件 B 的 ctx。
+// 每个函数进入真实逻辑前: 查能力位 -> 查参数边界 -> 扣 API 预算。
+struct HostApi {
+    void* ctx = nullptr;
+    std::int32_t (*read_rocket)(void* ctx, std::int32_t rocket_id, RocketView* out) = nullptr;
+    std::int32_t (*write_rocket)(void* ctx, const RocketView* view) = nullptr;
+    std::int32_t (*send_message)(void* ctx, std::int32_t player_id, const char* utf8_text) = nullptr;
+    std::int32_t (*log)(void* ctx, const char* utf8_text) = nullptr;
+};
+
 constexpr std::uint32_t kCapAll =
     kCapReadRocket | kCapWriteRocket | kCapSendMessage | kCapLog;
 
@@ -73,9 +86,10 @@ enum EventKind : std::uint32_t {
     kEventPlayerJoined  = 1u << 1,
     kEventPlayerLeft    = 1u << 2,
     kEventChatMessage   = 1u << 3,
+    kEventCommand       = 1u << 4,  // 控制台命令（commands.cpp 转发）
 };
 constexpr std::uint32_t kEventAll =
-    kEventWorldSnapshot | kEventPlayerJoined | kEventPlayerLeft | kEventChatMessage;
+    kEventWorldSnapshot | kEventPlayerJoined | kEventPlayerLeft | kEventChatMessage | kEventCommand;
 
 // 宿主 API 返回码：0 成功，负数是拒绝。所有入口先做边界检查再执行。
 enum HostStatus : std::int32_t {

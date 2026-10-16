@@ -30,6 +30,9 @@ public:
     // 引擎名（ASCII），用于日志。
     virtual const char* name() const = 0;
 
+    // 宿主 API 表（按值拷贝，由引擎自己持有）。
+    virtual void set_host_api(const HostApi& api) = 0;
+
     // 只接受编译好的字节码（QuickJS: JS_ReadObject + JS_READ_OBJ_BYTECODE）。
     // 返回 false = 字节码非法/版本不符；宿主会把插件置为 kFaulted。
     virtual bool load_bytecode(const std::uint8_t* data, std::size_t size) = 0;
@@ -58,6 +61,7 @@ public:
 class NullJsEngine final : public IJsEngine {
 public:
     const char* name() const override { return "null"; }
+    void set_host_api(const HostApi&) override {}
     bool load_bytecode(const std::uint8_t*, std::size_t) override { return false; }
     bool set_memory_limit(std::size_t) override { return true; }
     bool set_max_stack_size(std::size_t) override { return true; }

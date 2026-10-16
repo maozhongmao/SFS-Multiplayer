@@ -39,7 +39,16 @@ $cpps = Get-ChildItem $src -Recurse -File -Filter *.cpp | Where-Object {
     $_.Name -ne "sfs_server_min.cpp" -and
     $_.Name -ne "mini_server.cpp"
 }
-$cFiles = Get-ChildItem $src -Recurse -File -Include *.c | Where-Object { $_.FullName -like "*third_party*" }
+$pluginsOn = ($env:SFS_PLUGINS -eq '1')
+$cFiles = Get-ChildItem $src -Recurse -File -Include *.c | Where-Object {
+    $_.FullName -like "*third_party*" -and
+    # quickjs 只在启用插件时编译：否则每个发布包白白大 2MB，违背"关闭时零开销"。
+    ($pluginsOn -or $_.FullName -notlike "*third_party*quickjs*")
+}
+if ($pluginsOn) {
+    # quickjs 需要的编译宏（见 docs/plugin-system.md 第 7 节）
+    $cflags += @("-DCONFIG_BIGNUM=0", "-DCONFIG_STACK_CHECK=1", "-DSFS_PLUGINS=1", "-DSFS_PLUGINS_QUICKJS=1")
+}
 
 if (Test-Path $outDir) { Remove-Item $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir -Force | Out-Null

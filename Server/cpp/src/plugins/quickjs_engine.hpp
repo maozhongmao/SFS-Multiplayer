@@ -2,60 +2,222 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// 插件系统 - QuickJS / quickjs-ng 接入点（TODO，任务 #12 只做骨架，不引入外部依赖）。
+// 插件系统 - QuickJS(quickjs-ng) 实现（头文件实现，不需要改构建收集规则）。
 //
-// 默认 SFS_PLUGINS_QUICKJS=0：本文件不引用任何 quickjs 头，默认构建既不需要 SDK、
-// 也不下载依赖，二进制里不会多出任何 QuickJS 符号。
-//
-// 真正接入时:
-//   1. 取 quickjs-ng 源码放进 Server/cpp/src/third_party/quickjs（离线放入，不在构建里下载）。
-//   2. 交叉编译到 armv7 musl（命令行要点见 docs/plugin-system.md 第 6 节）。
-//   3. 把下面 TODO 处补全，并在服务端启动处安装 QuickJsEngineFactory。
-//
-// 安全基线（与任务 #12 的要求一致）:
-//   * 只跑字节码：宿主不暴露 JS_Eval 源码入口，磁盘上只有 compile 后的 .qbc。
-//   * 无文件/网络 API：QuickJS 自带 std/os 模块一律不注册，只注册 HostApi 白名单。
-//   * 超时中断：JS_SetInterruptHandler 每 N 条指令回调一次，预算用尽返回 1 终止。
+// 约束：每插件一份独立 JSRuntime/JSContext、单线程；只有 load_bytecode（板上不解析源码）；
+// 只注册 sfs.* 四个函数（转发 HostApi，能力位/边界/预算在宿主侧检查）；不注册 std/os/bignum。
+// 指令预算 = JS_SetInterruptHandler，超预算中断当次 dispatch 并返回 false。
 
 #pragma once
 
-#include "plugins/ijs_engine.hpp"
+#if defined(SFS_PLUGINS_QUICKJS)
 
-#ifndef SFS_PLUGINS_QUICKJS
-#define SFS_PLUGINS_QUICKJS 0
-#endif
+#include "plugins/ijs_engine.hpp"  // 含 plugin_types.hpp ⇒ HostApi 定义可见
 
-#if SFS_PLUGINS_QUICKJS
+#include <cstdint>
+#include <string>
 
+extern "C" {
 #include "quickjs.h"
+}
 
 namespace sfs::plugins {
 
-// TODO(#12): 按 IJsEngine 实现。要点:
-//   class QuickJsEngine final : public IJsEngine {
-//       JSRuntime* rt_ = nullptr;
-//       JSContext* ctx_ = nullptr;
-//       JSValue handler_{};
-//       std::uint64_t budget_ = 0, used_ = 0;
-//       bool interrupted_ = false;
-//   };
-//   load_bytecode:
-//       handler_ = JS_ReadObject(ctx_, data, size, JS_READ_OBJ_BYTECODE);
-//       // 约定: 字节码求值结果必须是函数（模块入口），否则视为非法插件
-//   dispatch:
-//       used_ = 0; interrupted_ = false;
-//       JSValue ev = snapshot_to_js(ctx_, event);   // 从 WorldSnapshot 构造批量事件对象
-//       JS_Call(ctx_, handler_, JS_UNDEFINED, 1, &ev);
-//       JS_FreeValue(ctx_, ev);
-//       return !interrupted_ && !JS_HasException(ctx_);
-//   set_memory_limit:      JS_SetMemoryLimit(rt_, bytes)
-//   set_max_stack_size:    JS_SetMaxStackSize(rt_, bytes)
-//   set_instruction_budget: 保存 budget_；JS_SetInterruptHandler(rt_, interrupt_cb, this)
-//       interrupt_cb: ++used_ >= budget_ ? 1 : 0   // 返回 1 = 中断执行
-//   collect_garbage:       JS_RunGC(rt_)
-//   unload:                JS_FreeValue(handler_) + JS_FreeContext + JS_FreeRuntime
+class QuickJsEngine final : public IJsEngine {
+public:
+    QuickJsEngine() = default;
+    ~QuickJsEngine() override { unload(); }
 
-// TODO(#12): class QuickJsEngineFactory final : public IJsEngineFactory { ... };
+    const char* name() const override { return "quickjs-ng"; }
+    void set_host_api(const HostApi& api) override { api_ = api; }
+
+    bool load_bytecode(const std::uint8_t* data, std::size_t size) override {
+        if (data == nullptr || size == 0) return false;
+        rt_ = JS_NewRuntime();
+        if (rt_ == nullptr) return false;
+        ctx_ = JS_NewContext(rt_);
+        if (ctx_ == nullptr) { unload(); return false; }
+        JS_SetContextOpaque(ctx_, this);
+        install_host_functions();
+        JSValue obj = JS_ReadObject(ctx_, data, size, JS_READ_OBJ_BYTECODE);
+        if (JS_IsException(obj)) { JS_FreeValue(ctx_, obj); unload(); return false; }
+        JSValue fn = JS_EvalFunction(ctx_, obj);
+        if (JS_IsException(fn) || !JS_IsFunction(ctx_, fn)) { JS_FreeValue(ctx_, fn); unload(); return false; }
+        on_event_ = fn;
+        return true;
+    }
+
+    bool set_memory_limit(std::size_t bytes) override {
+        if (rt_ == nullptr) return false;
+        JS_SetMemoryLimit(rt_, bytes);
+        return true;
+    }
+    bool set_max_stack_size(std::size_t bytes) override {
+        if (rt_ == nullptr) return false;
+        JS_SetMaxStackSize(rt_, bytes);
+        return true;
+    }
+    void set_instruction_budget(std::uint64_t budget) override {
+        budget_ = budget; used_ = 0;
+        if (rt_ != nullptr) JS_SetInterruptHandler(rt_, &QuickJsEngine::interrupt, this);
+    }
+    std::uint64_t instructions_used() const override { return used_; }
+
+    bool dispatch(const PluginEvent& event) override {
+        if (ctx_ == nullptr || JS_IsUndefined(on_event_)) return false;
+        used_ = 0;
+        JSValue arg = build_event(event);
+        JSValue ret = JS_Call(ctx_, on_event_, JS_UNDEFINED, 1, &arg);
+        JS_FreeValue(ctx_, arg);
+        const bool ok = !JS_IsException(ret);
+        JS_FreeValue(ctx_, ret);
+        if (!ok) { JSValue ex = JS_GetException(ctx_); JS_FreeValue(ctx_, ex); }
+        return ok;
+    }
+
+    void collect_garbage() override { if (rt_ != nullptr) JS_RunGC(rt_); }
+    void unload() override {
+        if (ctx_ != nullptr) { JS_FreeContext(ctx_); ctx_ = nullptr; }
+        if (rt_ != nullptr) { JS_FreeRuntime(rt_); rt_ = nullptr; }
+        on_event_ = JS_UNDEFINED; used_ = 0;
+    }
+
+private:
+    // quickjs-ng 0.17 的 JSInterruptHandler 签名是 (JSContext*, void*)，不是 JSRuntime*。
+    static int interrupt(JSContext*, void* opaque) {
+        QuickJsEngine* self = static_cast<QuickJsEngine*>(opaque);
+        if (self == nullptr) return 0;
+        if (self->budget_ != 0 && ++self->used_ > self->budget_) return 1;
+        return 0;
+    }
+
+    static QuickJsEngine* self(JSContext* ctx) {
+        return static_cast<QuickJsEngine*>(JS_GetContextOpaque(ctx));
+    }
+
+    static JSValue js_log(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr || s->api_.log == nullptr || argc < 1) return JS_NewInt32(ctx, -1);
+        const char* text = JS_ToCString(ctx, argv[0]);
+        if (text == nullptr) return JS_NewInt32(ctx, -2);
+        const std::int32_t rc = s->api_.log(s->api_.ctx, text);
+        JS_FreeCString(ctx, text);
+        return JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_send_message(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr || s->api_.send_message == nullptr || argc < 2) return JS_NewInt32(ctx, -1);
+        std::int32_t pid = -1;
+        if (JS_ToInt32(ctx, &pid, argv[0]) != 0) return JS_NewInt32(ctx, -2);
+        const char* text = JS_ToCString(ctx, argv[1]);
+        if (text == nullptr) return JS_NewInt32(ctx, -2);
+        const std::int32_t rc = s->api_.send_message(s->api_.ctx, pid, text);
+        JS_FreeCString(ctx, text);
+        return JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_read_rocket(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr || s->api_.read_rocket == nullptr || argc < 1) return JS_NewInt32(ctx, -1);
+        std::int32_t rid = -1;
+        if (JS_ToInt32(ctx, &rid, argv[0]) != 0) return JS_NewInt32(ctx, -2);
+        RocketView view{};
+        const std::int32_t rc = s->api_.read_rocket(s->api_.ctx, rid, &view);
+        if (rc != 0) return JS_NewInt32(ctx, rc);
+        return s->rocket_to_js(view);
+    }
+    static JSValue js_write_rocket(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr || s->api_.write_rocket == nullptr || argc < 1) return JS_NewInt32(ctx, -1);
+        RocketView view{};
+        JSValue v = argv[0];
+        JSValue p0 = JS_GetPropertyStr(ctx, v, "rocketId");  JS_ToInt32(ctx, &view.rocket_id, p0);   JS_FreeValue(ctx, p0);
+        JSValue p1 = JS_GetPropertyStr(ctx, v, "partCount"); JS_ToInt32(ctx, &view.part_count, p1);  JS_FreeValue(ctx, p1);
+        JSValue p2 = JS_GetPropertyStr(ctx, v, "throttle");  JS_ToFloat64(ctx, &view.throttle, p2);  JS_FreeValue(ctx, p2);
+        const std::int32_t rc = s->api_.write_rocket(s->api_.ctx, &view);
+        return JS_NewInt32(ctx, rc);
+    }
+
+    void install_host_functions() {
+        JSValue global = JS_GetGlobalObject(ctx_);
+        JSValue sfs = JS_NewObject(ctx_);
+        JS_SetPropertyStr(ctx_, sfs, "log", JS_NewCFunction(ctx_, &QuickJsEngine::js_log, "log", 1));
+        JS_SetPropertyStr(ctx_, sfs, "sendMessage", JS_NewCFunction(ctx_, &QuickJsEngine::js_send_message, "sendMessage", 2));
+        JS_SetPropertyStr(ctx_, sfs, "readRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_read_rocket, "readRocket", 1));
+        JS_SetPropertyStr(ctx_, sfs, "writeRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_write_rocket, "writeRocket", 1));
+        JS_SetPropertyStr(ctx_, global, "sfs", sfs);
+        JS_FreeValue(ctx_, global);
+    }
+
+    // 注意：这两个是【成员函数】（要用 ctx_），不能加 static。
+    JSValue rocket_to_js(const RocketView& v) const {
+        JSValue o = JS_NewObject(ctx_);
+        JS_SetPropertyStr(ctx_, o, "rocketId", JS_NewInt32(ctx_, v.rocket_id));
+        JS_SetPropertyStr(ctx_, o, "ownerPlayer", JS_NewInt32(ctx_, v.owner_player));
+        JS_SetPropertyStr(ctx_, o, "controlledBy", JS_NewInt32(ctx_, v.controlled_by));
+        JS_SetPropertyStr(ctx_, o, "partCount", JS_NewInt32(ctx_, v.part_count));
+        JS_SetPropertyStr(ctx_, o, "posX", JS_NewFloat64(ctx_, v.pos_x));
+        JS_SetPropertyStr(ctx_, o, "posY", JS_NewFloat64(ctx_, v.pos_y));
+        JS_SetPropertyStr(ctx_, o, "posZ", JS_NewFloat64(ctx_, v.pos_z));
+        JS_SetPropertyStr(ctx_, o, "velX", JS_NewFloat64(ctx_, v.vel_x));
+        JS_SetPropertyStr(ctx_, o, "velY", JS_NewFloat64(ctx_, v.vel_y));
+        JS_SetPropertyStr(ctx_, o, "velZ", JS_NewFloat64(ctx_, v.vel_z));
+        JS_SetPropertyStr(ctx_, o, "throttle", JS_NewFloat64(ctx_, v.throttle));
+        JS_SetPropertyStr(ctx_, o, "hasUpdateAuthority", JS_NewInt32(ctx_, v.has_update_authority));
+        return o;
+    }
+    JSValue player_to_js(const PlayerView& p) const {
+        JSValue o = JS_NewObject(ctx_);
+        JS_SetPropertyStr(ctx_, o, "playerId", JS_NewInt32(ctx_, p.player_id));
+        JS_SetPropertyStr(ctx_, o, "controlledRocket", JS_NewInt32(ctx_, p.controlled_rocket));
+        JS_SetPropertyStr(ctx_, o, "name", JS_NewString(ctx_, p.name));
+        return o;
+    }
+
+    JSValue build_event(const PluginEvent& event) {
+        JSValue o = JS_NewObject(ctx_);
+        const char* kind = "none";
+        switch (event.kind) {
+            case kEventWorldSnapshot: kind = "worldSnapshot"; break;
+            case kEventPlayerJoined:  kind = "playerJoined";  break;
+            case kEventPlayerLeft:    kind = "playerLeft";    break;
+            case kEventChatMessage:   kind = "chatMessage";   break;
+            case kEventCommand:       kind = "command";       break;
+            default: break;
+        }
+        JS_SetPropertyStr(ctx_, o, "kind", JS_NewString(ctx_, kind));
+        if (event.command != nullptr) JS_SetPropertyStr(ctx_, o, "command", JS_NewString(ctx_, event.command));
+        if (event.text != nullptr) JS_SetPropertyStr(ctx_, o, "text", JS_NewString(ctx_, event.text));
+        if (event.player != nullptr) JS_SetPropertyStr(ctx_, o, "player", player_to_js(*event.player));
+        if (event.world == nullptr) return o;
+        const WorldSnapshot& w = *event.world;
+        JS_SetPropertyStr(ctx_, o, "tick", JS_NewInt64(ctx_, static_cast<std::int64_t>(w.tick)));
+        JS_SetPropertyStr(ctx_, o, "worldTime", JS_NewFloat64(ctx_, w.world_time));
+        JS_SetPropertyStr(ctx_, o, "droppedRockets", JS_NewInt32(ctx_, static_cast<std::int32_t>(w.dropped_rockets)));
+        JSValue rockets = JS_NewArray(ctx_);
+        for (std::size_t i = 0; i < w.rockets.size(); ++i)
+            JS_SetPropertyUint32(ctx_, rockets, static_cast<std::uint32_t>(i), rocket_to_js(w.rockets[i]));
+        JS_SetPropertyStr(ctx_, o, "rockets", rockets);
+        JSValue players = JS_NewArray(ctx_);
+        for (std::size_t i = 0; i < w.players.size(); ++i)
+            JS_SetPropertyUint32(ctx_, players, static_cast<std::uint32_t>(i), player_to_js(w.players[i]));
+        JS_SetPropertyStr(ctx_, o, "players", players);
+        return o;
+    }
+
+    JSRuntime* rt_ = nullptr;
+    JSContext* ctx_ = nullptr;
+    JSValue on_event_ = JS_UNDEFINED;
+    HostApi api_{};
+    std::uint64_t budget_ = 0;
+    std::uint64_t used_ = 0;
+};
+
+class QuickJsEngineFactory final : public IJsEngineFactory {
+public:
+    std::unique_ptr<IJsEngine> create() override {
+        return std::unique_ptr<IJsEngine>(new QuickJsEngine());
+    }
+};
 
 }  // namespace sfs::plugins
 

@@ -51,6 +51,7 @@ struct PluginEvent {
     const WorldSnapshot* world = nullptr;  // kEventWorldSnapshot
     const PlayerView* player = nullptr;    // kEventPlayerJoined / kEventPlayerLeft
     const char* text = nullptr;            // kEventChatMessage（UTF-8，已限长）
+  const char* command = nullptr;         // kEventCommand（命令名，ASCII，已限长）
 };
 
 }  // namespace sfs::plugins

@@ -197,6 +197,8 @@ bool PluginHost::load(const PluginDescriptor& descriptor, std::string* error) {
         return fail("engine rejected memory limit");
     if (!engine->set_max_stack_size(descriptor.limits.max_stack_bytes))
         return fail("engine rejected stack limit");
+    // 把该插件的 HostApi 表交给引擎（引擎按值拷贝；能力位/预算仍由宿主检查）。
+    engine->set_host_api(api_for(descriptor.id));
     if (!engine->load_bytecode(descriptor.bytecode.data(), descriptor.bytecode.size()))
         return fail("engine rejected bytecode");
 

@@ -55,16 +55,7 @@ public:
     virtual void log(const char* ascii_text) = 0;
 };
 
-// 宿主 API 表: 交给引擎绑定层的一组 C 函数指针。ctx 是"每个插件一份"的
-// 绑定对象, 能力位绑在它上面 —— 插件 A 拿不到插件 B 的 ctx。
-// 每个函数进入真实逻辑前: 查能力位 -> 查参数边界 -> 扣 API 预算。
-struct HostApi {
-    void* ctx = nullptr;
-    std::int32_t (*read_rocket)(void* ctx, std::int32_t rocket_id, RocketView* out) = nullptr;
-    std::int32_t (*write_rocket)(void* ctx, const RocketView* view) = nullptr;
-    std::int32_t (*send_message)(void* ctx, std::int32_t player_id, const char* utf8_text) = nullptr;
-    std::int32_t (*log)(void* ctx, const char* utf8_text) = nullptr;
-};
+// HostApi 的定义已移到 plugin_types.hpp（那里不会被循环包含）。
 
 class PluginHost {
 public:
