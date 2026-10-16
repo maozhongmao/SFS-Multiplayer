@@ -52,7 +52,7 @@ if ($pluginsOn) {
 }
 if ($pluginsOn) {
     # quickjs 需要的编译宏（见 docs/plugin-system.md 第 7 节）
-    $cflags += @("-DCONFIG_BIGNUM=0", "-DCONFIG_STACK_CHECK=1", "-DSFS_PLUGINS=1", "-DSFS_PLUGINS_QUICKJS=1")
+    $cflags += @("-D_GNU_SOURCE -DCONFIG_BIGNUM=0", "-DCONFIG_STACK_CHECK=1", "-DSFS_PLUGINS=1", "-DSFS_PLUGINS_QUICKJS=1")
     # quickjs 的头文件目录
     $cflags += @("-I", (Join-Path $root "Server\cpp\third_party\quickjs"))
 }
