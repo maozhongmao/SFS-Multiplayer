@@ -1,0 +1,11 @@
+﻿Vendored third-party source: quickjs-ng (MIT)
+
+upstream: https://github.com/quickjs-ng/quickjs
+commit:   9b061718955874e648d8c2bf2910a717aac8fa63
+date:     2026-10-11
+fetched:  2026-10-16
+
+kept:   core C sources (quickjs.c/h, libregexp, libunicode, cutils, dtoa, libbf) + Makefile/CMakeLists + LICENSE/VERSION
+pruned: tests/, examples/, doc/, fuzz/, .github/, .git/
+
+update:  git clone --depth 1 <upstream> && copy the core files over, then refresh this file

@@ -35,3 +35,12 @@ AstroTheRabbit/Multiplayer-SFS project, licensed under GNU GPL version 3.
 Source: https://github.com/AstroTheRabbit/Multiplayer-SFS
 
 Spaceflight Simulator and its game assets are not included in this repository.
+
+## quickjs-ng (MIT)
+
+- 位置：`Server/cpp/third_party/quickjs/`
+- 上游：https://github.com/quickjs-ng/quickjs
+- 版本：commit 9b0617189558（2026-10-11）
+- 许可：MIT（Copyright (c) 2017-2026 Fabrice Bellard）
+- 用途：服务端插件系统（SFS_PLUGINS=1 时编译；关闭时不参与构建）
+- 详情见该目录下的 VENDORED.txt（含剪裁范围与更新方法）
