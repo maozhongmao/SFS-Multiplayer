@@ -56,28 +56,35 @@ Player.log*
 *.dmp
 
 # 工作目录 / 工具 / 临时目录
-.ackcheck/
-.hermes/
-.smoke-kcp/
-tools/
-deploy/
-wiki/
-smoketest/
 ServerCpp-backup-*/
 
 # 根目录里不进仓库的文档（贴到 GitHub Release 正文）
-CHANGELOG.md
 RELEASE-NOTES-V1.4.md
 RELEASE-NOTES-V1.3.5.md
 RELEASE-NOTES-V1.2.4.md
-LICENSE-MPL-2.0.txt
-SECURITY.md
-git-autosync.log*
 
 # 杂项
 NUL
 *.tmp
 Server/cpp/build/
-docs/
-scripts/
-CONTRIBUTING.md
+
+# 根级目录（必须带 / 锚定，否则会误伤 Server/cpp/docs 这类嵌套同名目录）
+/docs/
+/scripts/
+/tools/
+/wiki/
+/deploy/
+/smoketest/
+/.ackcheck/
+/.hermes/
+/.smoke-kcp/
+/CONTRIBUTING.md
+/CHANGELOG.md
+/LICENSE-MPL-2.0.txt
+/SECURITY.md
+/git-autosync.log*
+/RELEASE-NOTES-V1.4.md
+/RELEASE-NOTES-V1.3.5.md
+/RELEASE-NOTES-V1.2.4.md
+/Spaceflight-Simulator-MultiplayerMod-main/
+/ServerCpp-backup-*/
