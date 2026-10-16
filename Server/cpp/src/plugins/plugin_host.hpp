@@ -53,6 +53,12 @@ public:
     virtual bool send_message(std::int32_t player_id, const char* utf8_text) = 0;
     // 写服务端日志 (ascii_text 已保证 ASCII、已限长)。
     virtual void log(const char* ascii_text) = 0;
+
+    // 通用调用通道（默认不可用；服务端适配层实现它即可支持管理/查询类 API）。
+    // 返回 0 成功；负数 = 拒绝（-1 无能力 / -2 参数非法 / -3 不存在 / -4 预算）。
+    virtual std::int32_t call(const char*, const char*, char*, std::int32_t) {
+        return -1;
+    }
 };
 
 // HostApi 的定义已移到 plugin_types.hpp（那里不会被循环包含）。
@@ -119,6 +125,8 @@ private:
     static std::int32_t trampoline_write_rocket(void* ctx, const RocketView* view);
     static std::int32_t trampoline_send_message(void* ctx, std::int32_t player_id, const char* utf8_text);
     static std::int32_t trampoline_log(void* ctx, const char* utf8_text);
+    static std::int32_t trampoline_call(void* ctx, const char* op, const char* arg, char* out,
+                                        std::int32_t out_cap);
 
     Plugin* find(const std::string& plugin_id);
     const Plugin* find(const std::string& plugin_id) const;

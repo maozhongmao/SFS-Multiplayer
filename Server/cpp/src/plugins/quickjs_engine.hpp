@@ -131,6 +131,48 @@ private:
         JS_FreeCString(ctx, text);
         return JS_NewInt32(ctx, rc);
     }
+    // ---- 通用 call 通道的薄包装（新增 API 只写这几行 + 服务端一个 op）----
+    static std::int32_t do_call(QuickJsEngine* s, const char* op, const char* arg) {
+        if (s == nullptr || s->api_.call == nullptr) return -1;
+        return s->api_.call(s->api_.ctx, op, arg, nullptr, 0);
+    }
+    static JSValue call_string(JSContext* ctx, QuickJsEngine* s, const char* op) {
+        char buf[128] = {0};
+        if (s == nullptr || s->api_.call == nullptr) return JS_NewInt32(ctx, -1);
+        const std::int32_t rc = s->api_.call(s->api_.ctx, op, nullptr, buf, sizeof(buf));
+        return (rc == 0) ? JS_NewString(ctx, buf) : JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_get_world_time(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+        return call_string(ctx, self(ctx), "worldTime");
+    }
+    static JSValue js_server_info(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+        return call_string(ctx, self(ctx), "serverInfo");
+    }
+    static JSValue js_kick(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        QuickJsEngine* s = self(ctx);
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        std::int32_t pid = -1;
+        if (JS_ToInt32(ctx, &pid, argv[0]) != 0) return JS_NewInt32(ctx, -2);
+        std::string spec = std::to_string(pid);
+        if (argc >= 2) {
+            const char* why = JS_ToCString(ctx, argv[1]);
+            if (why != nullptr) { spec += "|"; spec += why; JS_FreeCString(ctx, why); }
+        }
+        return JS_NewInt32(ctx, do_call(s, "kick", spec.c_str()));
+    }
+    static JSValue js_clear_debris(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        std::int32_t n = 6;
+        if (argc >= 1) JS_ToInt32(ctx, &n, argv[0]);
+        return JS_NewInt32(ctx, do_call(self(ctx), "clearDebris", std::to_string(n).c_str()));
+    }
+    static JSValue js_set_time_scale(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        double x = 1.0;
+        if (argc < 1 || JS_ToFloat64(ctx, &x, argv[0]) != 0) return JS_NewInt32(ctx, -2);
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%.6f", x);
+        return JS_NewInt32(ctx, do_call(self(ctx), "setTimeScale", buf));
+    }
+
     // sfs.broadcast(text)：全体广播。映射到宿主 send_message 的 player_id < 0 语义。
     static JSValue js_broadcast(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
         QuickJsEngine* s = self(ctx);
@@ -181,8 +223,16 @@ private:
         JS_SetPropertyStr(ctx_, sfs, "sendMessage", JS_NewCFunction(ctx_, &QuickJsEngine::js_send_message, "sendMessage", 2));
         JS_SetPropertyStr(ctx_, sfs, "readRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_read_rocket, "readRocket", 1));
         JS_SetPropertyStr(ctx_, sfs, "writeRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_write_rocket, "writeRocket", 1));
+        // 消息类
         JS_SetPropertyStr(ctx_, sfs, "broadcast", JS_NewCFunction(ctx_, &QuickJsEngine::js_broadcast, "broadcast", 1));
+        // 查询类
         JS_SetPropertyStr(ctx_, sfs, "players", JS_NewCFunction(ctx_, &QuickJsEngine::js_players, "players", 0));
+        JS_SetPropertyStr(ctx_, sfs, "getWorldTime", JS_NewCFunction(ctx_, &QuickJsEngine::js_get_world_time, "getWorldTime", 0));
+        JS_SetPropertyStr(ctx_, sfs, "serverInfo", JS_NewCFunction(ctx_, &QuickJsEngine::js_server_info, "serverInfo", 0));
+        // 管理类
+        JS_SetPropertyStr(ctx_, sfs, "kick", JS_NewCFunction(ctx_, &QuickJsEngine::js_kick, "kick", 2));
+        JS_SetPropertyStr(ctx_, sfs, "clearDebris", JS_NewCFunction(ctx_, &QuickJsEngine::js_clear_debris, "clearDebris", 1));
+        JS_SetPropertyStr(ctx_, sfs, "setTimeScale", JS_NewCFunction(ctx_, &QuickJsEngine::js_set_time_scale, "setTimeScale", 1));
         JS_SetPropertyStr(ctx_, global, "sfs", sfs);
         JS_FreeValue(ctx_, global);
     }

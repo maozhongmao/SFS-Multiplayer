@@ -146,6 +146,29 @@ std::uint64_t PluginHost::fault_count(const std::string& plugin_id) const {
     return p ? p->faults : 0u;
 }
 
+std::int32_t PluginHost::trampoline_call(void* ctx, const char* op, const char* arg, char* out,
+                                        std::int32_t out_cap) {
+    Binding* b = static_cast<Binding*>(ctx);
+    if (b == nullptr || b->host == nullptr || b->plugin == nullptr) return kHostErrState;
+    PluginHost* host = b->host;
+    Plugin* p = b->plugin;
+    if (p->state != PluginState::kRunning) return kHostErrState;
+
+    // op -> 能力位（查询类 op 不需要能力位）
+    std::uint32_t need = 0u;
+    if (std::strcmp(op, "kick") == 0 || std::strcmp(op, "clearDebris") == 0 ||
+        std::strcmp(op, "setTimeScale") == 0) need = kCapAdmin;
+    else if (std::strcmp(op, "readRocket") == 0) need = kCapReadRocket;
+    else if (std::strcmp(op, "writeRocket") == 0) need = kCapWriteRocket;
+    else if (std::strcmp(op, "worldTime") != 0 && std::strcmp(op, "serverInfo") != 0) return kHostErrBadArgument;
+    if (need != 0u && (p->capabilities & need) == 0u) return kHostErrNoCapability;
+
+    const std::int32_t budget = host->consume_api_budget(p);
+    if (budget != kHostOk) return budget;
+    if (host->services_ == nullptr) return kHostErrUnavailable;
+    return host->services_->call(op, arg, out, out_cap);
+}
+
 HostApi PluginHost::api_for(const std::string& plugin_id) {
     HostApi api;
     // 函数指针始终有效；插件不存在时 ctx=nullptr，各函数返回 kHostErrState。
@@ -153,6 +176,7 @@ HostApi PluginHost::api_for(const std::string& plugin_id) {
     api.write_rocket = &PluginHost::trampoline_write_rocket;
     api.send_message = &PluginHost::trampoline_send_message;
     api.log          = &PluginHost::trampoline_log;
+    api.call         = &PluginHost::trampoline_call;
     Plugin* p = find(plugin_id);
     if (p != nullptr) {
         p->binding.host = this;

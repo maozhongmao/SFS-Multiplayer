@@ -12,6 +12,8 @@
 #include "util/log.hpp"
 
 #include <cstdio>
+#include <cstring>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -30,6 +32,32 @@ public:
     bool send_message(std::int32_t player_id, const char* utf8_text) override {
         if (server_ == nullptr || utf8_text == nullptr) return false;
         return server_->plugin_send_chat(player_id, utf8_text);
+    }
+
+    // 通用调用通道：op 白名单（能力位已在宿主侧检查过）。
+    std::int32_t call(const char* op, const char* arg, char* out, std::int32_t out_cap) override {
+        if (op == nullptr || server_ == nullptr) return -2;
+        if (std::strcmp(op, "kick") == 0) {
+            if (arg == nullptr) return -2;
+            const std::string spec(arg);
+            const std::size_t bar = spec.find('|');
+            const int pid = std::atoi(spec.substr(0, bar).c_str());
+            const std::string reason = (bar == std::string::npos) ? "" : spec.substr(bar + 1);
+            return server_->plugin_kick(pid, reason.c_str()) ? 0 : -3;
+        }
+        if (std::strcmp(op, "clearDebris") == 0) {
+            return server_->plugin_clear_debris(arg ? std::atoi(arg) : 6);
+        }
+        if (std::strcmp(op, "worldTime") == 0) {
+            return server_->plugin_world_time(out, out_cap);
+        }
+        if (std::strcmp(op, "setTimeScale") == 0) {
+            return server_->plugin_set_time_scale(arg ? std::atof(arg) : 1.0) ? 0 : -2;
+        }
+        if (std::strcmp(op, "serverInfo") == 0) {
+            return server_->plugin_server_info(out, out_cap);
+        }
+        return -2;
     }
 
     void log(const char* ascii_text) override {
@@ -82,7 +110,9 @@ int start(const char* plugin_path, sfs::server::Server* server) {
 
     PluginDescriptor desc;
     desc.id = "test-broadcast";
-    desc.capabilities = kCapSendMessage | kCapLog;   // 只要这两项：发消息 + 写日志
+    // 目前由服务端写死（示例插件用满：日志 + 消息 + 查询 + 管理）。
+    // 待改进：应当由插件自带描述符文件声明能力位，而不是服务端硬编码。
+    desc.capabilities = kCapSendMessage | kCapLog | kCapAdmin | kCapReadRocket | kCapWriteRocket;
     desc.limits.memory_limit_bytes = 1u << 20;       // 1 MB
     desc.limits.max_stack_bytes = 64u * 1024;        // 64 KB
     desc.limits.instruction_budget = 200000;         // 每轮 20 万条（与文档默认一致）
@@ -104,6 +134,41 @@ int start(const char* plugin_path, sfs::server::Server* server) {
 }
 
 }  // namespace sfs::plugins
+
+// ---- 以下都是 Server 的公开包装：把插件请求落到真实服务端 ----
+namespace sfs::server {
+
+bool Server::plugin_kick(std::int32_t player_id, const char* reason) {
+    if (player_id < 0) return false;
+    (void)reason;   // 现成的 try_kick 不带原因参数；要带原因需改它（后续）
+    std::string message;
+    return try_kick(std::to_string(player_id), &message);   // try_kick 支持按数字 id 找人
+}
+
+int Server::plugin_clear_debris(int max_parts) { return clear_debris(max_parts); }
+
+int Server::plugin_world_time(char* out, std::int32_t out_cap) {
+    if (out == nullptr || out_cap <= 0) return -2;
+    const double t = world_time();
+    std::snprintf(out, static_cast<std::size_t>(out_cap), "%.3f", t);
+    return 0;
+}
+
+bool Server::plugin_set_time_scale(double scale) {
+    if (!(scale > 0.0) || scale > 1000.0) return false;   // 拒绝 NaN/Inf/离谱值
+    set_time_scale(scale, "plugin");
+    return true;
+}
+
+int Server::plugin_server_info(char* out, std::int32_t out_cap) {
+    if (out == nullptr || out_cap <= 0) return -2;
+    std::int32_t players = 0;
+    for (auto& entry : conns_) if (entry.second.handshaked) ++players;
+    std::snprintf(out, static_cast<std::size_t>(out_cap), "players=%d", players);
+    return 0;
+}
+
+}  // namespace sfs::server
 
 // Server::plugin_send_chat 的实现（声明在 server.hpp，受同一个宏保护）。
 // 语义：一次调用 = 给全体玩家广播（用服务端现成的 chat 广播通道，客户端有聊天窗显示）。

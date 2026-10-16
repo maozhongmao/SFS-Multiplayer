@@ -110,6 +110,12 @@ public:
     // 插件系统：把一条消息发给指定玩家；player_id < 0 表示全体广播。
     // player_id >= 0：只发给该玩家；player_id < 0：全体广播。
     bool plugin_send_chat(std::int32_t player_id, const char* utf8_text);
+    // 插件系统用的公开包装（实现见 plugins/plugin_app.cpp）。
+    bool plugin_kick(std::int32_t player_id, const char* reason);
+    int  plugin_clear_debris(int max_parts);
+    int  plugin_world_time(char* out, std::int32_t out_cap);
+    bool plugin_set_time_scale(double scale);
+    int  plugin_server_info(char* out, std::int32_t out_cap);
 #endif
 
     void stop();

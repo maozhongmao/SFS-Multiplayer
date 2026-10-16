@@ -26,6 +26,7 @@ enum Capability : std::uint32_t {
     kCapWriteRocket = 1u << 1,  // sfs.writeRocket(view)
     kCapSendMessage = 1u << 2,  // sfs.sendMessage(playerId, text)
     kCapLog         = 1u << 3,  // sfs.log(text)
+    kCapAdmin       = 1u << 4,  // 管理类：kick / clearDebris / setTimeScale
 };
 struct RocketView;  // 前置声明：HostApi 只用它的指针（完整定义在 plugin_events.hpp）
 
@@ -38,10 +39,15 @@ struct HostApi {
     std::int32_t (*write_rocket)(void* ctx, const RocketView* view) = nullptr;
     std::int32_t (*send_message)(void* ctx, std::int32_t player_id, const char* utf8_text) = nullptr;
     std::int32_t (*log)(void* ctx, const char* utf8_text) = nullptr;
+    // 通用调用通道：op 是固定白名单里的操作名，arg 是参数，out 是可选结果缓冲区。
+    // 有了它，新增 API 只需在引擎加一个 JS 绑定 + 在服务端实现一个 op，
+    // 不必再改 HostServices/HostApi/trampoline/api_for 这些样板。
+    std::int32_t (*call)(void* ctx, const char* op, const char* arg, char* out,
+                         std::int32_t out_cap) = nullptr;
 };
 
 constexpr std::uint32_t kCapAll =
-    kCapReadRocket | kCapWriteRocket | kCapSendMessage | kCapLog;
+    kCapReadRocket | kCapWriteRocket | kCapSendMessage | kCapLog | kCapAdmin;
 
 inline bool has_capability(std::uint32_t caps, Capability cap) {
     return (caps & static_cast<std::uint32_t>(cap)) != 0u;
