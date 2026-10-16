@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "server/server.hpp"
+#include "plugins/plugin_bootstrap.hpp"  // SFS_PLUGINS=0 时展开为空
 #include "server/util.hpp"
 #include "util/log.hpp"
 
@@ -168,6 +169,13 @@ Server::CommandResult Server::execute_command(const std::string& command_line) {
         result.request_shutdown = true;
         result.message = "Saving and stopping the server safely.";
     } else {
+#if defined(SFS_PLUGINS) && SFS_PLUGINS
+        // 未知命令交给插件系统（插件可以新增命令）。
+        if (sfs::plugins::submit_console_command(command.c_str())) {
+            result.message = "";
+            return result;
+        }
+#endif
         result.message = "Unknown command. Type help for the command list.";
     }
 

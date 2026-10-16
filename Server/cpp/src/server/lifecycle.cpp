@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "server/server.hpp"
+#include "plugins/plugin_bootstrap.hpp"  // SFS_PLUGINS=0 时展开为空
 #include "server/util.hpp"
 #include "util/log.hpp"
 
@@ -51,6 +52,30 @@ bool Server::start() {
 void Server::run() {
     auto next_report = std::chrono::steady_clock::now() + std::chrono::seconds(30);
     while (g_running) {
+#if defined(SFS_PLUGINS) && SFS_PLUGINS
+        // 驱动插件系统：投递已到期的事件（世界快照/玩家上下线）。
+        sfs::plugins::tick(std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count());
+        // 每秒产出一次世界快照给插件（事件是粗粒度批量的：见 plugin_events.hpp）。
+        {
+            static auto plugin_last = std::chrono::steady_clock::now();
+            static std::uint64_t plugin_tick = 0;
+            const auto plugin_now = std::chrono::steady_clock::now();
+            if (plugin_now - plugin_last >= std::chrono::seconds(1)) {
+                plugin_last = plugin_now;
+                if (sfs::plugins::PluginHost* ph = sfs::plugins::global_host()) {
+                    sfs::plugins::WorldSnapshot snap;
+                    snap.tick = ++plugin_tick;
+                    for (auto& entry : conns_) {
+                        if (!entry.second.handshaked) continue;
+                        sfs::plugins::PlayerView pv;
+                        pv.player_id = entry.second.player_id;
+                        snap.players.push_back(pv);
+                    }
+                    ph->publish_world_snapshot(snap);
+                }
+            }
+        }
+#endif
         // 轮询不能长于 KCP 的工作间隔，否则没有 UDP 可读时重传和 ACK 会被延迟。
         if (kcp_.poll(5) < 0) {
             // 不能静默退出：以前直接 break 会让服务端"人间蒸发"——玩家侧只看到数据断流、

@@ -19,6 +19,8 @@ function broadcastToAll(event, text) {
   return sent;
 }
 
+// 末尾的 `onEvent;`（见文件底部）让字节码的"完成值"就是入口函数：
+// qjsc 出的脚本以函数声明结尾时完成值是 undefined，宿主因此拿不到入口。
 function onEvent(event) {
   // 启动提示：宿主装载后投递的第一个事件就提示一次（此后不再重复）。
   if (!STARTED) {
@@ -42,3 +44,9 @@ function onEvent(event) {
     sfs.log("player joined id=" + event.player.playerId);
   }
 }
+
+// 关键：显式把入口挂到 globalThis。
+// qjsc -b 出的字节码是按模块作用域编译的，函数声明不会自动成为全局；
+// 同时保留完成值，两条路都能被宿主取到。
+globalThis.onEvent = onEvent;
+onEvent;

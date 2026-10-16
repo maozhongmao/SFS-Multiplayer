@@ -21,6 +21,7 @@ namespace {
 // 全部是 POD 全局：没有构造/析构，不会被放进 .init_array，
 // 因此函数不可达时可以随 --gc-sections 一起被回收。
 HostServices* g_services = nullptr;
+IJsEngineFactory* g_factory = nullptr;
 PluginHost* g_host = nullptr;
 bool g_runtime_checked = false;
 bool g_runtime_enabled = false;
@@ -63,8 +64,22 @@ bool runtime_enabled() {
 
 PluginHost* global_host() {
     if (!runtime_enabled()) return nullptr;
-    if (g_host == nullptr) g_host = new PluginHost(g_services);
+    if (g_host == nullptr) g_host = new PluginHost(g_services, g_factory);
     return g_host;
+}
+
+
+void install_engine_factory(IJsEngineFactory* factory) {
+    g_factory = factory;
+}
+
+bool submit_console_command(const char* command) {
+    if (command == nullptr || command[0] == '\0') return false;
+    PluginHost* host = global_host();
+    if (host == nullptr) return false;
+    // 控制台来源用 player_id = -1 标记；插件据此区分“命令”与“玩家聊天”。
+    host->publish_chat(-1, command);
+    return true;
 }
 
 bool tick(double now_seconds) {

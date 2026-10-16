@@ -106,6 +106,11 @@ public:
 
     void run();
 
+#if defined(SFS_PLUGINS) && SFS_PLUGINS
+    // 插件系统：把一条消息发给指定玩家；player_id < 0 表示全体广播。
+    bool plugin_send_chat(std::int32_t player_id, const char* utf8_text);
+#endif
+
     void stop();
 
     // 拒绝加入：给客户端一条明确的 Disconnect 原因（对齐 C# SendDisconnectDirectAsync →

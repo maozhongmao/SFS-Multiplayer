@@ -28,11 +28,23 @@
 
 #include "plugins/plugin_host.hpp"
 
+// 注意：这个前置声明必须在 sfs::plugins【外面】，否则会变成 sfs::plugins::sfs::server::Server。
+namespace sfs::server { class Server; }
+
 namespace sfs::plugins {
 
 // 安装服务端适配层（启动时一次）。传 nullptr = 无适配层，
 // 插件的能力调用统一返回 kHostErrUnavailable（骨架默认状态）。
 void install_services(HostServices* services);
+
+// 安装 JS 引擎工厂（默认是 NullJsEngineFactory ⇒ load() 必然失败）。
+void install_engine_factory(IJsEngineFactory* factory);
+
+// 控制台未知命令转交插件（有插件处理则返回 true）。
+bool submit_console_command(const char* command);
+
+// 启动插件系统：注册服务/工厂、读取 .qbc、装载并订阅。返回装载成功的插件数。
+int start(const char* plugin_path, sfs::server::Server* server);
 
 // 运行期开关：编译期打开后，仍可用环境变量 SFS_PLUGINS=0/off 关掉。
 // 只在第一次调用时读取环境变量。

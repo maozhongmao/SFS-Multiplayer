@@ -38,25 +38,40 @@ public:
         ctx_ = JS_NewContext(rt_);
         if (ctx_ == nullptr) { unload(); return false; }
         JS_SetContextOpaque(ctx_, this);
+        if (memory_limit_ != 0) JS_SetMemoryLimit(rt_, memory_limit_);
+        if (stack_limit_ != 0) JS_SetMaxStackSize(rt_, stack_limit_);
         install_host_functions();
         JSValue obj = JS_ReadObject(ctx_, data, size, JS_READ_OBJ_BYTECODE);
         if (JS_IsException(obj)) { JS_FreeValue(ctx_, obj); unload(); return false; }
         JSValue fn = JS_EvalFunction(ctx_, obj);
-        if (JS_IsException(fn) || !JS_IsFunction(ctx_, fn)) { JS_FreeValue(ctx_, fn); unload(); return false; }
+        if (JS_IsException(fn)) {
+            std::fprintf(stderr, "[plugin] bytecode eval failed (bad bytecode or version mismatch)\n");
+            JS_FreeValue(ctx_, fn);
+            unload();
+            return false;
+        }
+        // 字节码的"完成值"不一定是函数（以函数声明结尾的脚本完成值是 undefined）。
+        // 这时回退到全局 onEvent —— 插件按契约把它的入口函数放在全局即可。
+        if (!JS_IsFunction(ctx_, fn)) {
+            JS_FreeValue(ctx_, fn);
+            JSValue global = JS_GetGlobalObject(ctx_);
+            fn = JS_GetPropertyStr(ctx_, global, "onEvent");
+            JS_FreeValue(ctx_, global);
+            if (!JS_IsFunction(ctx_, fn)) {
+                std::fprintf(stderr, "[plugin] bytecode exposed neither a function value nor a global onEvent\n");
+                JS_FreeValue(ctx_, fn);
+                unload();
+                return false;
+            }
+        }
         on_event_ = fn;
         return true;
     }
 
-    bool set_memory_limit(std::size_t bytes) override {
-        if (rt_ == nullptr) return false;
-        JS_SetMemoryLimit(rt_, bytes);
-        return true;
-    }
-    bool set_max_stack_size(std::size_t bytes) override {
-        if (rt_ == nullptr) return false;
-        JS_SetMaxStackSize(rt_, bytes);
-        return true;
-    }
+    // 宿主在 load_bytecode【之前】下发上限，所以这里只能先记住，
+    // 等 JS_NewRuntime 建好后再真正应用（否则会误判为拒绝）。
+    bool set_memory_limit(std::size_t bytes) override { memory_limit_ = bytes; return true; }
+    bool set_max_stack_size(std::size_t bytes) override { stack_limit_ = bytes; return true; }
     void set_instruction_budget(std::uint64_t budget) override {
         budget_ = budget; used_ = 0;
         if (rt_ != nullptr) JS_SetInterruptHandler(rt_, &QuickJsEngine::interrupt, this);
@@ -210,6 +225,8 @@ private:
     HostApi api_{};
     std::uint64_t budget_ = 0;
     std::uint64_t used_ = 0;
+    std::size_t memory_limit_ = 0;
+    std::size_t stack_limit_ = 0;
 };
 
 class QuickJsEngineFactory final : public IJsEngineFactory {

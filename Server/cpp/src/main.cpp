@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 #include "server/server.hpp"
+#include "plugins/plugin_bootstrap.hpp"  // SFS_PLUGINS=0 时展开为空
 
 #include "util/config.hpp"
 #include "util/log.hpp"
@@ -280,7 +281,16 @@ int main(int argc, char* argv[]) {
     std::signal(SIGTERM, signal_handler);
 
     try {
-        sfs::server::Server server(port, max_players, state_path, p2p, join);
+    #if defined(SFS_PLUGINS) && SFS_PLUGINS
+    // 装载预编译插件（.qbc）；路径可用 SFS_PLUGIN_PATH 覆盖。
+    static const char* kPluginDefault = "plugins/test_broadcast.qbc";
+    const char* plugin_path = std::getenv("SFS_PLUGIN_PATH");
+    if (plugin_path == nullptr) plugin_path = kPluginDefault;
+#endif
+    sfs::server::Server server(port, max_players, state_path, p2p, join);
+#if defined(SFS_PLUGINS) && SFS_PLUGINS
+    sfs::plugins::start(plugin_path, &server);
+#endif
         g_server = &server;
         if (!server.start()) return 1;
         SFS_LOGI(sfs::log::Cat::Config,
