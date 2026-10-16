@@ -109,13 +109,25 @@ int start(const char* plugin_path, sfs::server::Server* server) {
 // 语义：一次调用 = 给全体玩家广播（用服务端现成的 chat 广播通道，客户端有聊天窗显示）。
 namespace sfs::server {
 bool Server::plugin_send_chat(std::int32_t player_id, const char* utf8_text) {
-    (void)player_id;   // 无论传谁，都走全体广播；插件因此只需调用一次
     if (utf8_text == nullptr || utf8_text[0] == '\0') return false;
     sfs::protocol::SendChatMessagePacket pkt;
     pkt.sender_id = -1;
     pkt.message = utf8_text;
-    broadcast_packet(static_cast<std::uint8_t>(sfs::protocol::PacketType::kSendChatMessage), pkt, -1);
-    return true;
+    const auto type = static_cast<std::uint8_t>(sfs::protocol::PacketType::kSendChatMessage);
+    if (player_id < 0) {   // 全体广播
+        broadcast_packet(type, pkt, -1);
+        return true;
+    }
+    // 私聊：按 player_id 找到那条连接，只发给它（照 broadcast_packet 的写法）。
+    sfs::net::NetWriter body;
+    pkt.serialize(body);
+    for (auto& entry : conns_) {
+        if (!entry.second.handshaked) continue;
+        if (entry.second.player_id != player_id) continue;
+        send_payload(entry.first, type, body);
+        return true;
+    }
+    return false;   // 该玩家不存在
 }
 }  // namespace sfs::server
 

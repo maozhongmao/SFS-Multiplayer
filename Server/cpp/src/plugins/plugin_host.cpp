@@ -279,6 +279,17 @@ void PluginHost::publish_player_left(const PlayerView& player) {
     pending_events_.push_back(std::move(e));
 }
 
+void PluginHost::publish_command(const char* command) {
+    if (plugins_.empty() || command == nullptr) return;
+    if (pending_events_.size() >= kMaxPendingEvents) { ++dropped_events_; return; }
+    PendingEvent e;
+    e.kind = kEventCommand;
+    std::size_t n = 0;
+    while (n + 1u < kMaxTextBytes && command[n] != '\0') ++n;
+    e.text.assign(command, n);
+    pending_events_.push_back(std::move(e));
+}
+
 void PluginHost::publish_chat(std::int32_t player_id, const char* utf8_text) {
     if (plugins_.empty()) return;
     if (pending_events_.size() >= kMaxPendingEvents) {
@@ -333,7 +344,8 @@ void PluginHost::pump(double now_seconds) {
         event.kind = pe.kind;
         // 注意：chat 事件也要带上 player —— 插件靠 player.playerId（控制台为 -1）
         // 区分"控制台命令"和"玩家聊天"。以前这里只填 text，插件永远收不到来源。
-        if (pe.kind == kEventChatMessage) event.text = pe.text.c_str();
+        if (pe.kind == kEventChatMessage || pe.kind == kEventCommand) event.text = pe.text.c_str();
+        if (pe.kind == kEventCommand) event.command = pe.text.c_str();
         event.player = &pe.player;
         deliver(event);
     }

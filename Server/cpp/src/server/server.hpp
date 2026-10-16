@@ -108,6 +108,7 @@ public:
 
 #if defined(SFS_PLUGINS) && SFS_PLUGINS
     // 插件系统：把一条消息发给指定玩家；player_id < 0 表示全体广播。
+    // player_id >= 0：只发给该玩家；player_id < 0：全体广播。
     bool plugin_send_chat(std::int32_t player_id, const char* utf8_text);
 #endif
 

@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 extern "C" {
 #include "quickjs.h"
@@ -130,6 +131,27 @@ private:
         JS_FreeCString(ctx, text);
         return JS_NewInt32(ctx, rc);
     }
+    // sfs.broadcast(text)：全体广播。映射到宿主 send_message 的 player_id < 0 语义。
+    static JSValue js_broadcast(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr || s->api_.send_message == nullptr || argc < 1) return JS_NewInt32(ctx, -1);
+        const char* text = JS_ToCString(ctx, argv[0]);
+        if (text == nullptr) return JS_NewInt32(ctx, -2);
+        const std::int32_t rc = s->api_.send_message(s->api_.ctx, -1, text);
+        JS_FreeCString(ctx, text);
+        return JS_NewInt32(ctx, rc);
+    }
+
+    // sfs.players()：最近一次世界快照里的在线玩家（结构化，插件不必自己从事件里翻）。
+    static JSValue js_players(JSContext* ctx, JSValueConst, int, JSValueConst*) {
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr) return JS_NewArray(ctx);
+        JSValue arr = JS_NewArray(ctx);
+        for (std::size_t i = 0; i < s->last_players_.size(); ++i)
+            JS_SetPropertyUint32(ctx, arr, static_cast<std::uint32_t>(i), s->player_to_js(s->last_players_[i]));
+        return arr;
+    }
+
     static JSValue js_read_rocket(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
         QuickJsEngine* s = self(ctx);
         if (s == nullptr || s->api_.read_rocket == nullptr || argc < 1) return JS_NewInt32(ctx, -1);
@@ -159,6 +181,8 @@ private:
         JS_SetPropertyStr(ctx_, sfs, "sendMessage", JS_NewCFunction(ctx_, &QuickJsEngine::js_send_message, "sendMessage", 2));
         JS_SetPropertyStr(ctx_, sfs, "readRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_read_rocket, "readRocket", 1));
         JS_SetPropertyStr(ctx_, sfs, "writeRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_write_rocket, "writeRocket", 1));
+        JS_SetPropertyStr(ctx_, sfs, "broadcast", JS_NewCFunction(ctx_, &QuickJsEngine::js_broadcast, "broadcast", 1));
+        JS_SetPropertyStr(ctx_, sfs, "players", JS_NewCFunction(ctx_, &QuickJsEngine::js_players, "players", 0));
         JS_SetPropertyStr(ctx_, global, "sfs", sfs);
         JS_FreeValue(ctx_, global);
     }
@@ -205,6 +229,7 @@ private:
         if (event.player != nullptr) JS_SetPropertyStr(ctx_, o, "player", player_to_js(*event.player));
         if (event.world == nullptr) return o;
         const WorldSnapshot& w = *event.world;
+        last_players_ = w.players;   // 缓存给 sfs.players()
         JS_SetPropertyStr(ctx_, o, "tick", JS_NewInt64(ctx_, static_cast<std::int64_t>(w.tick)));
         JS_SetPropertyStr(ctx_, o, "worldTime", JS_NewFloat64(ctx_, w.world_time));
         JS_SetPropertyStr(ctx_, o, "droppedRockets", JS_NewInt32(ctx_, static_cast<std::int32_t>(w.dropped_rockets)));
@@ -227,6 +252,7 @@ private:
     std::uint64_t used_ = 0;
     std::size_t memory_limit_ = 0;
     std::size_t stack_limit_ = 0;
+    std::vector<PlayerView> last_players_;   // 最近快照的玩家（sfs.players() 用）
 };
 
 class QuickJsEngineFactory final : public IJsEngineFactory {

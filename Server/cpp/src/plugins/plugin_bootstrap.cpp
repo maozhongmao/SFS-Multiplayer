@@ -78,7 +78,7 @@ bool submit_console_command(const char* command) {
     PluginHost* host = global_host();
     if (host == nullptr) return false;
     // 控制台来源用 player_id = -1 标记；插件据此区分“命令”与“玩家聊天”。
-    host->publish_chat(-1, command);
+    host->publish_command(command);   // 命令走独立事件种类，不与聊天混淆
     return true;
 }
 

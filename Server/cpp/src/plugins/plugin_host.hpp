@@ -88,6 +88,8 @@ public:
     void publish_player_joined(const PlayerView& player);
     void publish_player_left(const PlayerView& player);
     void publish_chat(std::int32_t player_id, const char* utf8_text);
+    // 控制台命令：与聊天分开，插件收到 kind="command"（event.command 是命令名）。
+    void publish_command(const char* command);
 
     // 主循环每轮调用一次。没有已订阅插件时直接返回 (一次空判断)。
     void pump(double now_seconds);
