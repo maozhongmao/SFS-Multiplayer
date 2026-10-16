@@ -94,7 +94,10 @@
 # 采样（把 PROC 换成目标进程名）
 sh board-sample.sh 2 30 > perf.csv
 
-# C# 版采样脚本在 data/ C++ 版派生脚本在 data/logs/ 单个快照
+# C# 版采样脚本在 data
+# C++ 版派生脚本在 data/logs
+
+# 单个快照
 awk '/^VmRSS|^VmSize|^Threads/{print}' /proc/<pid>/status
 ```
 

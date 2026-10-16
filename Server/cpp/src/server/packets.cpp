@@ -60,7 +60,8 @@ std::string upload_timestamp() {
     return std::string(stamp);
 }
 
-// 存到进程工作目录下的 logs/（目标设备上是 data/logs/ save_uploaded_log(std::int32_t player_id,
+// 存到进程工作目录下的 logs/（目标设备上是 data/logs
+std::string save_uploaded_log(std::int32_t player_id,
                               const std::string& username,
                               const sfs::protocol::UploadLogPacket& pkt) {
 #if defined(_WIN32)

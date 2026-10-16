@@ -96,15 +96,15 @@ foreach ($t in $targets) {
     foreach ($f in $cpps) {
         $o = Join-Path $objDir ($f.Directory.Name + "_" + $f.BaseName + ".o")
         [void]$objs.Add($o)
-        if ($t.arch -ne "") { & $zig c++ -target $t.arch -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DSFS_PLUGINS=1 -DSFS_PLUGINS_QUICKJS=1 -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
-        else                { & $zig c++ -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DSFS_PLUGINS=1 -DSFS_PLUGINS_QUICKJS=1 -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
+        if ($t.arch -ne "") { & $zig c++ -target $t.arch -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I (Join-Path $root "Server\cpp\third_party\quickjs") -DSFS_PLUGINS=1 -DSFS_PLUGINS_QUICKJS=1 -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
+        else                { & $zig c++ -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I (Join-Path $root "Server\cpp\third_party\quickjs") -DSFS_PLUGINS=1 -DSFS_PLUGINS_QUICKJS=1 -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
         if ($LASTEXITCODE -ne 0) { throw ("server compile failed: " + $f.Name) }
     }
     foreach ($f in $cFiles) {
         $o = Join-Path $objDir ($f.Directory.Name + "_" + $f.BaseName + ".o")
         [void]$objs.Add($o)
-        if ($t.arch -ne "") { & $zig cc -target $t.arch -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
-        else                { & $zig cc -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
+        if ($t.arch -ne "") { & $zig cc -target $t.arch -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I (Join-Path $root "Server\cpp\third_party\quickjs") -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
+        else                { & $zig cc -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I (Join-Path $root "Server\cpp\third_party\quickjs") -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
         if ($LASTEXITCODE -ne 0) { throw ("server compile failed: " + $f.Name) }
     }
 

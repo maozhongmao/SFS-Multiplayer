@@ -4,7 +4,8 @@
 
 // 世界存档读写（与 C# ServerStateStore 的 JSON 格式互通）。
 //
-// 格式实测自板端真实存档（data/   { "SchemaVersion": 1, "SavedAtUtc": "...",
+// 格式实测自板端真实存档（data
+//   { "SchemaVersion": 1, "SavedAtUtc": "...",
 //     "World": { "WorldTime": <double>, "Difficulty": <int>,
 //                "Rockets": { "<id>": { "RocketName", "Location":{X,Y,Vx,Vy,Address},
 //                                       "Rotation", "AngularVelocity",
