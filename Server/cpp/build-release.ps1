@@ -64,7 +64,13 @@ $cpps = Get-ChildItem $src -Recurse -File -Filter *.cpp | Where-Object {
     $_.Name -ne "sfs_server_min.cpp" -and
     $_.Name -ne "mini_server.cpp"
 }
-$cFiles = Get-ChildItem $src -Recurse -File -Include *.c | Where-Object { $_.FullName -like "*third_party*" }
+$cFiles = @()
+$cFiles += Get-ChildItem $src -Recurse -File -Include *.c | Where-Object { $_.FullName -like "*third_party*" }
+# quickjs 放在 Server/cpp/third_party/quickjs（在 $src 之外）；只收库文件，
+# qjs.c/qjsc.c 等自带 main 的工具有 duplicate symbol 风险。
+$qjsLib = @('quickjs.c','libregexp.c','libunicode.c','dtoa.c')
+$cFiles += Get-ChildItem (Join-Path $root "Server\cpp\third_party\quickjs") -File -Include *.c -EA SilentlyContinue |
+    Where-Object { $qjsLib -contains $_.Name }
 
 # Four targets: Windows, the usual VPS case (linux x64), modern ARM boxes and Raspberry Pi 4+
 # (arm64), plus the board used by this project (armv7). All Linux builds are statically
