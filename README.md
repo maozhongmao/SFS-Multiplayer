@@ -1,6 +1,6 @@
 # Spaceflight-simulator-Multiplayer
 
-Spaceflight Simulator 的实时多人联机项目。
+Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.net
 
 本项目通过客户端模组和独立服务端，让多个玩家进入同一个 SFS 世界，实时同步玩家火箭及其状态，并提供多人联机所需的基础网络功能。
 
