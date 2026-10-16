@@ -9,6 +9,38 @@
 Windows x64 独立实时联机服务端原型，面向 Spaceflight Simulator 的
 Multiplayer-SFS/Lidgren 线协议。服务端不依赖游戏进程，不修改导入的 SFS 存档。
 
+## 目录结构（先看这里）
+
+```
+Server/
+├─ cpp/                     C++ 服务端（**当前主线**，板子/云服务器上跑的就是它）
+│   ├─ src/                 C++ 源码（协议 KCP/UDP、世界同步、插件系统）
+│   ├─ tests/               一致性/线格式测试
+│   ├─ third_party/quickjs/ 插件引擎（quickjs-ng，MIT，见该目录 VENDORED.txt）
+│   └─ docs/                设计文档（线格式、ADR、插件系统等）
+├─ src/                     .NET(C#) 服务端 —— 1.2.0 时代的原型，仍在仓库里但非主线
+├─ tests/                   .NET 侧测试
+├─ third_party/             第三方依赖（Lidgren 等，含各自 LICENSE）
+├─ server.example.yml       **C++ 服务端**的配置示例（现行格式）
+├─ server.example.json      **.NET 服务端**的配置示例（旧格式，勿混用）
+├─ SfsMultiplayer.sln       .NET 解决方案（编译 src/）
+├─ LICENSE                  MPL-2.0
+├─ LICENSE-GPL-3.0.legacy.txt  历史许可（早期版本曾是 GPL，保留备查）
+└─ THIRD-PARTY-NOTICES.md   第三方组件声明
+```
+
+**两份示例配置别搞混**：
+
+| 文件 | 给谁用 | 格式 |
+|---|---|---|
+| `server.example.yml` | `cpp/`（当前主线）| `bind_address / port / max_connections / p2p:` … |
+| `server.example.json` | `src/`（.NET 原型）| `WorldPath / StatePath / Port` …（PascalCase）|
+
+> 历史遗留清理记录（2026-10-16）：删除了两个反编译产物目录
+> （`analysis-classic-lidgren/`、`analysis-spacewizards-lidgren/`，共 123 个 .cs）
+> 与一个误入库的编译产物（`fixed-server/SFS-Multiplayer-Server.exe`，418KB）。
+> 反编译产物不再入库；需要时按各自 LICENSE 重新获取第三方源码。
+
 ## 当前交付范围
 
 已完成：

@@ -11,7 +11,7 @@ Spaceflight Simulator 的实时多人联机项目。
 ## 项目组成
 
 - `Client/`：客户端联机模组源码。
-- `Plugin/`：独立联机服务端插件。
+- `Plugin/`：**服务端插件示例（QuickJS）**——`example_01_log.js` 日志 / `example_02_message.js` 消息 / `example_03_query.js` 查询 / `example_04_admin.js` 管理 / `example_05_rocket.js` 火箭，每类一个文件、注释即文档。
 - `Server/`：独立联机服务端源码。
 - `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)。
 - `README.md`：本项目的 [README](README.md)。
