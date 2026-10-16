@@ -197,8 +197,6 @@ bool PluginHost::load(const PluginDescriptor& descriptor, std::string* error) {
         return fail("engine rejected memory limit");
     if (!engine->set_max_stack_size(descriptor.limits.max_stack_bytes))
         return fail("engine rejected stack limit");
-    // 把该插件的 HostApi 表交给引擎（引擎按值拷贝；能力位/预算仍由宿主检查）。
-    engine->set_host_api(api_for(descriptor.id));
     if (!engine->load_bytecode(descriptor.bytecode.data(), descriptor.bytecode.size()))
         return fail("engine rejected bytecode");
 
@@ -212,6 +210,12 @@ bool PluginHost::load(const PluginDescriptor& descriptor, std::string* error) {
     plugin->engine = std::move(engine);
 
     plugins_.push_back(std::move(plugin));
+    // 【顺序很关键】HostApi 必须在插件注册进 plugins_ 之后再交给引擎：
+    // api_for() 内部靠 find(plugin_id) 拿绑定对象，早于注册就只会得到 ctx=nullptr，
+    // 于是插件所有 sfs.* 调用都静默失败（不报错、无输出，极难发现）。
+    if (plugins_.back() && plugins_.back()->engine) {
+        plugins_.back()->engine->set_host_api(api_for(descriptor.id));
+    }
     return true;
 }
 
@@ -327,8 +331,10 @@ void PluginHost::pump(double now_seconds) {
     for (const PendingEvent& pe : pending_events_) {
         PluginEvent event;
         event.kind = pe.kind;
+        // 注意：chat 事件也要带上 player —— 插件靠 player.playerId（控制台为 -1）
+        // 区分"控制台命令"和"玩家聊天"。以前这里只填 text，插件永远收不到来源。
         if (pe.kind == kEventChatMessage) event.text = pe.text.c_str();
-        else event.player = &pe.player;
+        event.player = &pe.player;
         deliver(event);
     }
     pending_events_.clear();

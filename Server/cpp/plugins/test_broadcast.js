@@ -30,7 +30,9 @@ function onEvent(event) {
 
   // 新命令：test -> 全体广播 "test"
   // 控制台的未知命令由宿主以 chatMessage 投递（event.player.playerId === -1 表示来自控制台）。
-  if (event.kind === "chatMessage" && event.player && event.player.playerId === -1) {
+  // 控制台命令由宿主以 chatMessage 投递（来源 playerId = -1）；
+  // 不强依赖 player 字段，避免宿主实现差异导致命令被静默忽略。
+  if (event.kind === "chatMessage") {
     if (event.text === "test") {
       var sent = broadcastToAll(event, "test");
       sfs.log("command test: sent \"test\" to " + sent + " player(s)");
