@@ -333,7 +333,7 @@ int main(int argc, char** argv) {
 
     run.V("p2ppeeroffer.inactive", proto::PacketType::kP2PPeerOffer, proto::P2PPeerOfferPacket{});
     run.V("p2ppeeroffer.active", proto::PacketType::kP2PPeerOffer,
-          proto::P2PPeerOfferPacket{true, 2, "192.168.1.3", 21899, "pair-abc", 10, {1, 2, 3}, {4, 5}});
+          proto::P2PPeerOfferPacket{true, 2, "192.168.1.10", 21899, "pair-abc", 10, {1, 2, 3}, {4, 5}});
 
     run.Report();
     return run.failures() == 0 ? 0 : 1;

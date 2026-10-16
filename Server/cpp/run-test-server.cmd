@@ -1,7 +1,7 @@
 @echo off
 rem 本机测试用服务端启动器（Windows）
 rem 用法：run-test-server.cmd [端口]     默认 9806
-rem 存档写到 test-run\state.json，和板子上的存档完全分开。
+rem 存档写到 test-run\state.json，和目标设备上的存档完全分开。
 setlocal
 set PORT=%~1
 if "%PORT%"=="" set PORT=9806

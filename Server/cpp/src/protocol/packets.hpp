@@ -569,7 +569,7 @@ struct UploadLogPacket {
     void deserialize(sfs::net::NetReader& r);
 };
 
-// 单次日志上传的压缩后体积上限（超过直接拒收，避免占满板子存储）
+// 单次日志上传的压缩后体积上限（超过直接拒收，避免占满目标设备存储）
 constexpr std::int32_t kMaxLogUploadBytes = 6 * 1024 * 1024;
 
 // ---- 包体组装 / 拆分 ----

@@ -5,7 +5,7 @@
 // SFS Multiplayer 服务端 —— C++ / ARM 常驻版（第一阶段）。
 //
 // 本文件只做“能连上、能握手、能保活”，不含火箭/部件同步业务逻辑。
-// 目的：在 Luckfox Lume（ARMv7 / 88MB RAM）上取一份真实的内存与 CPU 基线，
+// 目的：在 ARMv7 Lume（ARMv7 / 88MB RAM）上取一份真实的内存与 CPU 基线，
 // 与 C# 版（VmRSS 34832 kB / VmSize 245908 kB / 15 线程）逐项对比。
 //
 // 单线程 epoll，无额外工作线程，不写任何持久化文件。

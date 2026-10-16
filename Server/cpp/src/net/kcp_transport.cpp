@@ -107,7 +107,7 @@ inline const char* ntop(int family, const void* addr, char* out, std::size_t out
 #endif
 }
 
-// 端点转文本：IPv4-mapped 的 IPv6 按纯 IPv4 打，否则日志里会满是 ::ffff:192.168.1.6。
+// 端点转文本：IPv4-mapped 的 IPv6 按纯 IPv4 打，否则日志里会满是 ::ffff:192.168.1.10。
 inline bool endpoint_to_string(const sockaddr_storage& ss, char* out, std::size_t out_len) {
     const AddrKey k = address_key(ss);
     if (k.family == 4) return ntop(AF_INET, k.bytes, out, out_len) != nullptr;
@@ -218,7 +218,7 @@ bool KcpTransport::init(std::uint16_t port, const char* bind_addr) {
     // 故意不设 SO_REUSEADDR：UDP 下它会让两个实例同时绑同一端口，收包被劈开，
     // 表现为"服务在跑却收不到玩家的包"。单实例由 /etc/init.d/S99sfs 的 pidof 守卫保证。
     // 扩大内核收发缓冲（默认 256 KB 在满速同步下会被内核丢包，丢的包全变成 KCP 重传）。
-    // 必须在 bind 之前设；值会被 net.core.rmem_max 截断，所以板子上也要把 rmem_max 抬起来。
+    // 必须在 bind 之前设；值会被 net.core.rmem_max 截断，所以目标设备上也要把 rmem_max 抬起来。
     sfs::platform::SetSocketBuffers(udp_fd_, 1048576, 1048576);
 
     if (!sfs::platform::SetNonBlocking(udp_fd_)) {

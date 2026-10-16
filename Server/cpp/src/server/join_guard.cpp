@@ -61,7 +61,7 @@ unsigned char ascii_lower(unsigned char c) {
 
 // ---------------------------------------------------------------- SHA-256
 // 只为对齐 C# 的 PasswordMatches（两边各自 SHA-256 再比较）而实现，不引入外部依赖
-//（板子上是交叉编译的静态产物，多一个加密库就多一份部署风险）。
+//（目标设备上是交叉编译的静态产物，多一个加密库就多一份部署风险）。
 constexpr std::uint32_t kSha256K[64] = {
     0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
     0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,

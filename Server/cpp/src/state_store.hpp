@@ -4,8 +4,7 @@
 
 // 世界存档读写（与 C# ServerStateStore 的 JSON 格式互通）。
 //
-// 格式实测自板端真实存档（/mnt/UDISK/sfs-test/data/server-state.json）：
-//   { "SchemaVersion": 1, "SavedAtUtc": "...",
+// 格式实测自板端真实存档（data/   { "SchemaVersion": 1, "SavedAtUtc": "...",
 //     "World": { "WorldTime": <double>, "Difficulty": <int>,
 //                "Rockets": { "<id>": { "RocketName", "Location":{X,Y,Vx,Vy,Address},
 //                                       "Rotation", "AngularVelocity",
@@ -44,8 +43,8 @@ struct SavedWorld {
 // ---------------------------------------------------------------- 存档健壮性
 // （对齐 server.yml 的 auto_save_seconds 自保逻辑，并补齐 C# ServerStateStore 没有的校验）
 
-// 单份存档的体积上限。板子上任何一次异常写出都可能把存档撑大，超过就拒收：
-// 板子总共只有几十 MB，为了解析一个异常大的文件耗尽内存比丢一次存档更糟。
+// 单份存档的体积上限。目标设备上任何一次异常写出都可能把存档撑大，超过就拒收：
+// 目标设备总共只有几十 MB，为了解析一个异常大的文件耗尽内存比丢一次存档更糟。
 constexpr std::int64_t kMaxStateFileBytes = 64LL * 1024 * 1024;   // 64 MB
 
 // 支持的存档结构版本。写侧固定写 1；读侧遇到更高版本必须拒收 ——

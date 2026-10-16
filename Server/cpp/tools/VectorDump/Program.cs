@@ -449,7 +449,7 @@ internal static class Program
         Packet("p2ppeeroffer.inactive", PacketType.P2PPeerOffer, new P2PPeerOfferPacket());
         Packet("p2ppeeroffer.active", PacketType.P2PPeerOffer, new P2PPeerOfferPacket
         {
-            Active = true, PeerPlayerId = 2, PeerAddress = "192.168.1.3", PeerPort = 21899,
+            Active = true, PeerPlayerId = 2, PeerAddress = "192.168.1.10", PeerPort = 21899,
             PairToken = "pair-abc", TransitionBufferSeconds = 10,
             LocalRocketIds = new List<int> { 1, 2, 3 },
             PeerRocketIds = new List<int> { 4, 5 },

@@ -4,7 +4,7 @@
 
 # SFS Multiplayer 服务端：C#/.NET 架构 vs C++ 架构 性能对比
 
-测量平台：Luckfox Lume（Allwinner T153，四核 Cortex-A7，ARMv7 32 位，`MemTotal 88664 kB`，无 swap）。
+测量平台：ARMv7 Lume（Allwinner T153，四核 Cortex-A7，ARMv7 32 位，`MemTotal 88664 kB`，无 swap）。
 采样方式：两边使用**同一个采样脚本**（`board-sample.sh`，2 秒间隔），数值直接读 `/proc/<pid>/status`
 与 `/proc/<pid>/stat`；CPU 由 `(utime+stime)` 增量除以墙钟时间得出（HZ=100）。
 
@@ -39,9 +39,9 @@
 
 ## 3. 关键结论
 
-1. **内存是这次换架构的核心收益。** 板子总共 88 MB，C# 版常驻 36.8 MB，
+1. **内存是这次换架构的核心收益。** 目标设备总共 88 MB，C# 版常驻 36.8 MB，
    运行时系统只剩 **11.5 MB** 可用 —— 这正是此前一直与内存搏斗的根因。
-   C++ 版常驻 2.07 MB，系统可用内存回到 **43.7 MB**，同样的板子从"勉强跑"变成"余量充足"。
+   C++ 版常驻 2.07 MB，系统可用内存回到 **43.7 MB**，同样的目标设备从"勉强跑"变成"余量充足"。
 2. **并发成本低一个数量级。** 单线程 epoll 事件循环替代 CLR 线程池（16 线程中位，
    压测时涨到 25），线程调度与栈占用全部消失。
 3. **CPU 占用约 1/50。** 低负载段 4.13% → 0.08%，主要是省掉了 GC 与运行时后台线程的空转。
@@ -78,7 +78,7 @@
 ### 这一节的关键含义
 
 - **C# 版的真正瓶颈是系统可用内存**：4096 箱时只剩 **6.9 MB**，
-  板子处于随时被 OOM Killer 干掉的边缘 —— 这才是当年"内存不够用"的实质。
+  目标设备处于随时被 OOM Killer 干掉的边缘 —— 这才是当年"内存不够用"的实质。
 - **C++ 版装下 2 倍物体后，系统仍剩 28.0 MB**，而且是单线程在扛。
 - 折算到每物体，内存低 **5.9 倍**、CPU 低 **6.3 倍**；
   线程从 21 降到 1，调度与线程栈开销整体消失。
@@ -94,10 +94,7 @@
 # 采样（把 PROC 换成目标进程名）
 sh board-sample.sh 2 30 > perf.csv
 
-# C# 版采样脚本在 /mnt/UDISK/sfs-test/board-sample.sh（PROC=SFS-Multiplayer-Server）
-# C++ 版派生脚本在 /mnt/mmc/sfs-cpp/bs-cpp.sh（PROC=sfs-server-full-arm）
-
-# 单个快照
+# C# 版采样脚本在 data/ C++ 版派生脚本在 data/logs/ 单个快照
 awk '/^VmRSS|^VmSize|^Threads/{print}' /proc/<pid>/status
 ```
 

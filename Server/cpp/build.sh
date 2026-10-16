@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 全量构建服务端：
-#   arm-linux-gnueabihf -> build/zig-arm/sfs-server-kcp-arm   （板子 9806 生产）
+#   arm-linux-gnueabihf -> build/zig-arm/sfs-server-kcp-arm   （目标设备 9806 生产）
 #   x86_64-windows-gnu  -> build/zig-win/sfs-server-kcp-win.exe（本机测试）
 #
 # 必须全量编译：只要改过 server.hpp 里的结构体（如 Connection），只重编部分 .cpp 会让
@@ -53,7 +53,7 @@ build_target() {
     echo "  构建完成: $outfile"
 }
 
-# EXP 档只出板子那一个目标，跳过生产五平台，避免误覆盖已发布产物。
+# EXP 档只出目标设备那一个目标，跳过生产五平台，避免误覆盖已发布产物。
 if [ "$EXP" = "1" ]; then
     echo "=== EXP（服务端实验档 · ROM 优先）==="
     build_target arm-linux-gnueabihf build/exp-arm build/exp-arm/sfs-server-kcp-arm -lpthread
@@ -61,7 +61,7 @@ if [ "$EXP" = "1" ]; then
     exit 0
 fi
 
-echo "=== ARM（板子）==="
+echo "=== ARM（目标设备）==="
 build_target arm-linux-gnueabihf build/zig-arm build/zig-arm/sfs-server-kcp-arm -lpthread
 echo "=== Windows（本机测试）==="
 build_target x86_64-windows-gnu build/zig-win build/zig-win/sfs-server-kcp-win.exe -lws2_32

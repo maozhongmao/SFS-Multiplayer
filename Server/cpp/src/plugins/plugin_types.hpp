@@ -58,7 +58,7 @@ inline bool has_capability(std::uint32_t caps, Capability cap) {
 //   max_stack_bytes     -> JS_SetMaxStackSize  （递归/栈深度上限）
 //   instruction_budget  -> JS_SetInterruptHandler 的计数阈值（每轮投递）
 //   max_api_calls       -> 宿主侧每轮投递允许的宿主 API 调用次数
-// 板子余量小，默认值刻意保守；服务端可用 PluginDescriptor::limits 覆盖。
+// 目标设备余量小，默认值刻意保守；服务端可用 PluginDescriptor::limits 覆盖。
 struct PluginLimits {
     std::size_t   memory_limit_bytes = 256u * 1024u;  // 每插件堆上限 256 KB
     std::size_t   max_stack_bytes    = 32u * 1024u;   // 栈上限 32 KB
@@ -66,7 +66,7 @@ struct PluginLimits {
     std::uint32_t max_api_calls      = 1024u;         // 每轮投递 API 调用上限
 };
 
-// 服务端能接受的取值上限（防止描述符里写出把板子打爆的数字）。
+// 服务端能接受的取值上限（防止描述符里写出把目标设备打爆的数字）。
 constexpr std::size_t   kMaxMemoryLimitBytes   = 2u * 1024u * 1024u;
 constexpr std::size_t   kMaxStackBytes         = 256u * 1024u;
 constexpr std::uint64_t kMaxInstructionBudget  = 5000000u;

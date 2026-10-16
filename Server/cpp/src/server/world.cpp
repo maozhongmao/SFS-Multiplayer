@@ -261,7 +261,7 @@ void Server::cool_idle_rockets() {
         ++cooled;
     }
     if (cooled != 0) {
-        // 诊断行必须 ASCII：服务端 stdout 在板子终端上只保证 ASCII（TMP 无中文字形）。
+        // 诊断行必须 ASCII：服务端 stdout 在目标设备终端上只保证 ASCII（TMP 无中文字形）。
         SFS_LOGI(Cat::World, "[cpp-server] cold-rocket blob: packed %llu idle rocket(s)",
                  static_cast<unsigned long long>(cooled));
     }

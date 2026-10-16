@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 //
 // 存档读写的最小验证程序：只做 load -> save -> reload -> 比对，不涉及网络。
-// 用于在开发机上快速定位存档解析问题（板子上调试手段有限）。
+// 用于在开发机上快速定位存档解析问题（目标设备上调试手段有限）。
 
 #include "state_store.hpp"
 

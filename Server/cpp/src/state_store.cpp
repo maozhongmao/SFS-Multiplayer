@@ -268,7 +268,7 @@ void write_rocket(std::ostringstream& out, const sfs::protocol::RocketState& r) 
 
 namespace {
 
-// 体积探测：必须在读入内存之前做，否则"先整个读进来再判断是否过大"本身就足以让板子 OOM。
+// 体积探测：必须在读入内存之前做，否则"先整个读进来再判断是否过大"本身就足以让目标设备 OOM。
 bool file_too_large(const std::string& path, std::int64_t* out_size, std::string* error) {
     std::ifstream probe(path, std::ios::binary);
     if (!probe) {

@@ -332,7 +332,7 @@ void Server::handle_frame(int fd, const TcpFrame& frame) {
                 // 每秒只放行 1 份单火箭快照，其余全部静默丢弃。而客户端是按枚请求的
                 // （附近快照循环 / 插值陈旧补包 / Excellent 档 750ms 校验），17 枚火箭时
                 // 恢复通道只吐出不到 1/17 的量 —— "漏一次就永久错"的兜底等于瘫痪。
-                // 实测（板子 9806，探针）：一次突发 6 枚只回 1 份；同样 6 枚间隔 1.2 秒发则 6/6。
+                // 实测（目标设备 9806，探针）：一次突发 6 枚只回 1 份；同样 6 枚间隔 1.2 秒发则 6/6。
                 // 改为 (fd, rocket_id) 维度：每枚火箭各自 1 次/秒，防自激风暴的作用不变。
                 static std::unordered_map<std::uint64_t, std::chrono::steady_clock::time_point> last_rocket_snapshot_at;
                 const auto now_snap2 = std::chrono::steady_clock::now();

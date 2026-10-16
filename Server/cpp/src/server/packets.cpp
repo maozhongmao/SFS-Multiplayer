@@ -44,7 +44,7 @@ std::string sanitize_upload_name(const std::string& raw) {
     return out;
 }
 
-// 上传文件名里的可读时间戳（本地时间，板子上是 UTC+0）
+// 上传文件名里的可读时间戳（本地时间，目标设备上是 UTC+0）
 std::string upload_timestamp() {
     const std::time_t now = std::time(nullptr);
     std::tm tm_buf{};
@@ -60,8 +60,7 @@ std::string upload_timestamp() {
     return std::string(stamp);
 }
 
-// 存到进程工作目录下的 logs/（板子上是 /mnt/mmc/sfs-cpp/logs/）
-std::string save_uploaded_log(std::int32_t player_id,
+// 存到进程工作目录下的 logs/（目标设备上是 data/logs/ save_uploaded_log(std::int32_t player_id,
                               const std::string& username,
                               const sfs::protocol::UploadLogPacket& pkt) {
 #if defined(_WIN32)
@@ -935,7 +934,7 @@ void Server::handle_packet(int fd, const std::vector<std::uint8_t>& payload, std
                 // 【2026-10-06】原"实验性访问"授权门已砍掉：用户决定本版本不校验身份，
                 // 权限分组后续并进密码系统。
                 // 保留的唯一护栏是 stop —— 它不是权限判定，是防手滑：远程把服务端关掉之后，
-                // 板子上没有交互式终端，只能 SSH 进去重启。
+                // 目标设备上没有交互式终端，只能 SSH 进去重启。
                 // 取首 token 转小写比对，避免 "STOP" / 前导空格绕过。
                 std::string first = pkt.command.substr(0, pkt.command.find_first_of(" \t\r\n"));
                 for (char& ch : first) {

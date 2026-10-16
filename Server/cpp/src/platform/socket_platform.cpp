@@ -60,7 +60,7 @@ bool SetReuseAddress(sfs_socket_t socket) {
 }
 
 // 扩大内核收发缓冲。为什么必须做：默认值（Linux net.core.rmem_default，常见 256 KB）在
-// 满速同步下会被内核直接丢掉 —— 现场实测板子 eth1 的 rx_dropped 持续增长（615 -> 618 / 15s），
+// 满速同步下会被内核直接丢掉 —— 现场实测目标设备 eth1 的 rx_dropped 持续增长（615 -> 618 / 15s），
 // 而同一时刻物理链路是零丢包、零错误、ping 最坏 2ms。
 // 内核丢掉的每一个包都会变成 KCP 的一次超时重传，把 srtt 从 2ms 抬到近 1 秒，
 // 表现为"玩到一半突然卡顿"，最后服务端按 heartbeat timeout 把会话判死。

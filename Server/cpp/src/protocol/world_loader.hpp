@@ -32,7 +32,7 @@ std::optional<WorldSnapshot> load_world_binary(const std::filesystem::path& path
 bool save_world_binary(const std::filesystem::path& path, const WorldSnapshot& snapshot);
 
 // 兼容层：从 C# JSON 存档转换为二进制（仅开发期用，板端不需要）
-// 实际部署时由开发机跑一次，把生成的二进制文件拷到板子上
+// 实际部署时由开发机跑一次，把生成的二进制文件拷到目标设备上
 std::optional<WorldSnapshot> load_world_from_json(const std::filesystem::path& world_folder);
 
 } // namespace sfs::protocol

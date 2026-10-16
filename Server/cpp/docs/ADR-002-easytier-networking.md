@@ -38,13 +38,13 @@ EasyTier 不参与服务端职责，也不改变服务端与客户端之间的�
 
 | 目标 | 发布物 |
 |---|---|
-| **Luckfox Lume 板子（ARMv7）** | `easytier-linux-armv7-v2.6.4.zip`（另有 armhf / armv7hf 变体） |
+| **ARMv7 Lume 目标设备（ARMv7）** | `easytier-linux-armv7-v2.6.4.zip`（另有 armhf / armv7hf 变体） |
 | **PC 玩家（Windows）** | `easytier-windows-x86_64-v2.6.4.zip`（另有 i686 / arm64） |
 | 其他 Linux | aarch64 / loongarch64 / mips / mipsel / riscv64 |
 | macOS | x86_64 / aarch64 |
 | 安卓 | `app-arm-release.apk` / `app-arm64-release.apk` |
 
-**体积**（决定板子上放哪里）：
+**体积**（决定目标设备上放哪里）：
 
 | 发布物 | zip 体积 |
 |---|---|
@@ -53,7 +53,7 @@ EasyTier 不参与服务端职责，也不改变服务端与客户端之间的�
 | `easytier-linux-aarch64` | 19.3 MB |
 
 > 解压后的二进制体积需实测（Rust 静态链接通常显著大于 zip）。
-> **注意板子约束**：`/mnt/UDISK` 当前仅 28.6 MB 可用空间，
+> **注意目标设备约束**：`/mnt/UDISK` 当前仅 28.6 MB 可用空间，
 > ARMv7 包放 UDISK 可能吃紧，必要时放 TF 卡（`/mnt/mmc`）。
 
 **命令行接口**：
@@ -114,7 +114,7 @@ EasyTier 不参与服务端职责，也不改变服务端与客户端之间的�
 
 ## 其余约束
 
-- **板子空间**：见上文 `/mnt/UDISK` 的 28.6 MB 约束。
+- **目标设备空间**：见上文 `/mnt/UDISK` 的 28.6 MB 约束。
 - **防火墙**：穿透失败常因防火墙拦截入站，需要在玩家侧放行 11010（或依赖中继兜底）。
 
 ## 与服务器撮合 P2P 的区别（两套东西，不要混）

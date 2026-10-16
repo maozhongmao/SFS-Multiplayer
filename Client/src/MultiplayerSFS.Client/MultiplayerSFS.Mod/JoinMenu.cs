@@ -652,7 +652,7 @@ Published: August 16, 2026";
 			if (all == null || all.Length == 0) return null;
 
 			// 域名可能同时有 A 和 AAAA，而 GetHostAddresses 的顺序没有保证。
-			// 本套部署是"域名只挂 AAAA 指向板子"，所以有可用的 IPv6 时优先走 IPv6；
+			// 本套部署是"域名只挂 AAAA 指向目标设备"，所以有可用的 IPv6 时优先走 IPv6；
 			// 但本机没有 IPv6 出口时优先它只会白等一个超时，所以那时退回 IPv4。
 			if (HasUsableIPv6())
 			{
