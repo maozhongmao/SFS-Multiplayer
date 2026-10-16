@@ -47,7 +47,7 @@ if ($pluginsOn) {
     # quickjs 放在 Server/cpp/third_party/quickjs（在 $src 之外），只在启用插件时收集。
     # 只收 quickjs 的库文件：qjs.c/qjsc.c 等工具自带 main，收进来会 duplicate symbol。
     $qjsLib = @('quickjs.c','libregexp.c','libunicode.c','dtoa.c')
-    $cFiles += Get-ChildItem (Join-Path $root "Server\cpp\third_party\quickjs") -File -Include *.c -EA SilentlyContinue |
+    $cFiles += Get-ChildItem (Join-Path $root "Server\cpp\third_party\quickjs") -File -Filter *.c -EA SilentlyContinue |
         Where-Object { $qjsLib -contains $_.Name }
 }
 if ($pluginsOn) {
