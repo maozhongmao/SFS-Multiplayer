@@ -19,6 +19,8 @@ $repo   = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path   # 仓库根（
 $root   = $repo
 $zig    = Join-Path $root "tools\zig-x86_64-windows-0.16.0\zig.exe"
 $src    = Join-Path $root "Server\cpp\src"
+# quickjs 头目录（插件引擎需要；关闭 SFS_PLUGINS 时不会被用到，多一个 -I 无副作用）
+$qjsInc = Join-Path $root "Server\cpp\third_party\quickjs"
 $proj   = Join-Path $root "Client\src\MultiplayerSFS.Client\MultiplayerSFS.Client.csproj"
 $relDir = Join-Path $root ("Client\release-V" + $Version)
 $stage  = Join-Path $root ("artifacts\release-V" + $Version)
@@ -94,15 +96,15 @@ foreach ($t in $targets) {
     foreach ($f in $cpps) {
         $o = Join-Path $objDir ($f.Directory.Name + "_" + $f.BaseName + ".o")
         [void]$objs.Add($o)
-        if ($t.arch -ne "") { & $zig c++ -target $t.arch -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -c $f.FullName -o $o }
-        else                { & $zig c++ -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -c $f.FullName -o $o }
+        if ($t.arch -ne "") { & $zig c++ -target $t.arch -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DSFS_PLUGINS=1 -DSFS_PLUGINS_QUICKJS=1 -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
+        else                { & $zig c++ -std=c++17 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DSFS_PLUGINS=1 -DSFS_PLUGINS_QUICKJS=1 -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
         if ($LASTEXITCODE -ne 0) { throw ("server compile failed: " + $f.Name) }
     }
     foreach ($f in $cFiles) {
         $o = Join-Path $objDir ($f.Directory.Name + "_" + $f.BaseName + ".o")
         [void]$objs.Add($o)
-        if ($t.arch -ne "") { & $zig cc -target $t.arch -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -c $f.FullName -o $o }
-        else                { & $zig cc -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -c $f.FullName -o $o }
+        if ($t.arch -ne "") { & $zig cc -target $t.arch -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
+        else                { & $zig cc -std=c11 -Os -DNDEBUG -ffunction-sections -fdata-sections -I $src -I $qjsInc -DCONFIG_BIGNUM=0 -DCONFIG_STACK_CHECK=1 -c $f.FullName -o $o }
         if ($LASTEXITCODE -ne 0) { throw ("server compile failed: " + $f.Name) }
     }
 
