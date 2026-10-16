@@ -11,8 +11,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 ## 项目组成
 
 - `Client/`：客户端联机模组源码。
-- `Plugin/`：**服务端插件示例（QuickJS）**——`example_01_log.js` 日志 / `example_02_message.js` 消息 / `example_03_query.js` 查询 / `example_04_admin.js` 管理 / `example_05_rocket.js` 火箭，每类一个文件、注释即文档。
-- `Server/`：独立联机服务端源码。
+- `Plugin/`：**服务端插件示例（QuickJS）。**
 - `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
@@ -30,9 +29,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - KCP 网络传输；需要可靠送达的业务包与高频状态包按类型分流。
 - 服务端权威处理关键多人事件。
 - 太空垃圾自动清理：失去控制且部件数低于阈值的碎片会被自动移除，阈值可在服务端配置。
-- **服务端插件系统（QuickJS）**：服务端可加载预编译的 JS 字节码插件（`SFS_PLUGINS=1` 开启，默认关闭；关闭时产物与未引入前逐字节一致）。
-  插件可读写日志、给指定玩家或全体发消息、读在线玩家名单，并接收世界快照/玩家进出/聊天/控制台命令等事件。
-  文档：[`Server/cpp/docs/PLUGIN_SYSTEM.md`](Server/cpp/docs/PLUGIN_SYSTEM.md)　示例插件：`Server/cpp/plugins/test_broadcast.js`。
+- **服务端插件系统（QuickJS）**：服务端可加载预编译的 JS 字节码插件（`SFS_PLUGINS=1` 开启，默认关闭；关闭时产物与未引入前逐字节一致）。插件可读写日志、给指定玩家或全体发消息、读在线玩家名单，并接收世界快照/玩家进出/聊天/控制台命令等事件。
 
 ## 使用前提
 
