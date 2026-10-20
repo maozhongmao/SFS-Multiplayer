@@ -13,7 +13,6 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - `Client/`：客户端联机模组源码。
 - `Plugin/`：独立联机服务端插件。
 - `Server/`：独立联机服务端源码。
-- `.gitignore`：Git忽略文件配置。
 - `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
