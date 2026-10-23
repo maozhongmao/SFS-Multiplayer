@@ -50,6 +50,18 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 
 本项目是独立开发的非官方多人联机工具，与 Spaceflight Simulator 官方团队及其权利人没有隶属、授权或合作关系。
 
+## Star历史
+
+感谢所有使用SFS-Multiplayer、报告漏洞、请求功能、测试构建并贡献修复的朋友们。
+
+<a href="https://www.star-history.com/?repos=maozhongmao%2Fsfs-multiplayer%2Csfsplayer-sys%2Fspaceflight-simulator-multiplayermod%2Carctic-ice67%2Fspaceflightsimulator-multiplayermod-mobileandpc&type=date&legend=top-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod%2Carctic-ice67/spaceflightsimulator-multiplayermod-mobileandpc&type=date&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod%2Carctic-ice67/spaceflightsimulator-multiplayermod-mobileandpc&type=date&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod%2Carctic-ice67/spaceflightsimulator-multiplayermod-mobileandpc&type=date&legend=bottom-right" />
+ </picture>
+</a>
+
 ## 文档
 
 - [项目维基](https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer/wiki)：项目结构、联机架构、网络协议、编译发布、部署运维与常见问题。
