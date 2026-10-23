@@ -10,7 +10,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 
 ## 项目组成
 
-- `Android/`：客户端联机绑定源码。
+- `Android/`：客户端联机补丁源码。
 - `Client/`：客户端联机模组源码。
 - `Plugin/`：独立联机服务端插件。
 - `Server/`：独立联机服务端源码。
