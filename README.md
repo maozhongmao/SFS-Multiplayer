@@ -36,14 +36,14 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 ## 使用前提
 
 - 正版 Spaceflight Simulator。
-- `UITools` 前置模组。
+- `UITools` 前置模组。[这里下载](https://github.com/cucumber-sp/UITools/releases)
 - 与服务端匹配的客户端模组和服务端程序。
 
 ## 基本使用方式
 
-1. 安装 SFS 和 `UITools`。
-2. 将与服务端匹配的客户端模组放入游戏的 `Mods` 目录。
-3. 启动对应版本的独立服务端，按机器架构选择文件，配置见同目录下的 `server.yml`。
+1. 安装 SFS 和 UITools 。
+2. 将与服务端匹配的客户端模组放入游戏的 Mods 目录。
+3. 启动对应版本的独立服务端，按机器架构选择文件，配置见同目录下的 server.yml 。
 4. 在游戏的 Multiplayer 菜单中填写服务器地址和端口。
 5. 输入用户名并加入服务器。
 
