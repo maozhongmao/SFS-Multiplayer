@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- versionCode / versionName 不写在这里：由 build.ps1 从 VERSION 文件算出，
+     再用 aapt2 link 的版本参数注入（每次构建第 4 段 +1）。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.sfsmp.patcher">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="33" />
+
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+    <application
+        android:label="SFS 联机补丁"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity
+            android:name="com.sfsmp.patcher.MainActivity"
+            android:exported="true"
+            android:label="SFS 联机补丁">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.sfsmp.patcher.ConfirmActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver
+            android:name="com.sfsmp.patcher.InstallReceiver"
+            android:exported="false" />
+    </application>
+</manifest>
