@@ -90,6 +90,11 @@ static char   g_lplanet[40] = "Earth";
 static volatile int g_have_pose = 0;
 static volatile int g_global_id = -1;
 static volatile int g_create_sent = 0;
+static volatile int g_rx_primary = 0;
+/* v166: 屏幕诊断（主力机没 adb，只能让 mod 自己把结论显示出来） */
+static char g_dg_addr[80] = "";
+static int  g_dg_af = 0, g_dg_cand = 0, g_dg_sendok = 0, g_dg_sendfail = 0, g_dg_errno = 0;                          /* v163: 下行 primary 计数（量频率） */
+int mp_rx_primary_count(void){ return g_rx_primary; }
 static volatile int g_joined = 0;
 /* v97: 服务器下发的世界时间（HelloAck 里带；也是 WorldSnapshot 的第一个字段） */
 static volatile double g_server_world_time = 0.0;
@@ -214,13 +219,26 @@ static void rr_parse_create(const unsigned char* p, int nbytes, int* out_lid, in
           pt->x = br_f32(&r); pt->y = br_f32(&r);
           pt->ox = br_f32(&r); pt->oy = br_f32(&r); pt->oz = br_f32(&r);
           pt->temp = br_f32(&r);
-          /* 变量字典：本期不落地，但必须按格式跳过，否则偏移错位 */
+          /* v161: 变量字典必须真正落地（燃料/电量/帆/着陆腿状态全靠它），
+           * 超出本地容量时仍按格式读完丢弃，避免偏移错位。 */
           int n = br_i32(&r); if(n < 0 || n > 4096) n = 0;
-          for(k=0;k<n;k++){ char kb[64]; br_str(&r, kb, sizeof(kb)); (void)br_f64(&r); }
+          for(k=0;k<n;k++){
+              char kb[64]; br_str(&r, kb, sizeof(kb)); double dv = br_f64(&r);
+              if(k < MP_RV_NUM){ snprintf(pt->nv[k].name,sizeof(pt->nv[k].name),"%s",kb); pt->nv[k].v = dv; }
+              pt->nnv = (k < MP_RV_NUM) ? (k+1) : pt->nnv;
+          }
           n = br_i32(&r); if(n < 0 || n > 4096) n = 0;
-          for(k=0;k<n;k++){ char kb[64]; br_str(&r, kb, sizeof(kb)); (void)br_bool(&r); }
+          for(k=0;k<n;k++){
+              char kb[64]; br_str(&r, kb, sizeof(kb)); int bv = br_bool(&r);
+              if(k < MP_RV_TOG){ snprintf(pt->tv[k].name,sizeof(pt->tv[k].name),"%s",kb); pt->tv[k].v = bv; }
+              pt->ntv = (k < MP_RV_TOG) ? (k+1) : pt->ntv;
+          }
           n = br_i32(&r); if(n < 0 || n > 4096) n = 0;
-          for(k=0;k<n;k++){ char kb[64], vb[64]; br_str(&r, kb, sizeof(kb)); br_str(&r, vb, sizeof(vb)); }
+          for(k=0;k<n;k++){
+              char kb[64], vb[64]; br_str(&r, kb, sizeof(kb)); br_str(&r, vb, sizeof(vb));
+              if(k < MP_RV_TXT){ snprintf(pt->xv[k].name,sizeof(pt->xv[k].name),"%s",kb); snprintf(pt->xv[k].val,sizeof(pt->xv[k].val),"%s",vb); }
+              pt->nxv = (k < MP_RV_TXT) ? (k+1) : pt->nxv;
+          }
           if(!br_bool(&r)){                        /* burns */
               (void)br_f32(&r); (void)br_f32(&r); (void)br_f32(&r);
               { char tb[64]; br_str(&r, tb, sizeof(tb)); br_str(&r, tb, sizeof(tb)); }
@@ -268,7 +286,21 @@ static ikcpcb* g_kcp = NULL;
 static int mp_output(const char* buf, int len, ikcpcb* kcp, void* user){
     (void)kcp; (void)user;
     if(g_fd < 0) return -1;
-    return (int)send(g_fd, buf, (size_t)len, 0);
+    { int n = (int)send(g_fd, buf, (size_t)len, 0);
+      /* v165: UDP 的 connect() 不验证可达性，send 才是真格 —— 失败必须留证 */
+      if(n < 0){ g_dg_sendfail++; g_dg_errno = errno; static int fails = 0;
+          if(fails < 6){ fails++; char eb[110];
+              snprintf(eb,sizeof(eb),"mp: send failed errno=%d len=%d (fails=%d)\n", errno, len, fails); mp_log(eb); } }
+      else { g_dg_sendok++; static int oks = 0; if(oks < 3){ oks++; char ob[90];
+              snprintf(ob,sizeof(ob),"mp: send ok n=%d len=%d\n", n, len); mp_log(ob); } }
+      return n; }
+}
+
+void mp_diag(char* out, int cap){
+    if(!out || cap < 32) return;
+    snprintf(out, (size_t)cap, "联机 %s af=%d 发 ok=%d fail=%d e=%d rx=%llums",
+             g_dg_addr[0] ? g_dg_addr : "(未解析)", g_dg_af, g_dg_sendok, g_dg_sendfail,
+             g_dg_errno, (unsigned long long)mp_last_rx_age_ms());
 }
 
 static unsigned long long mp_now_ms(void){
@@ -653,6 +685,8 @@ static void mp_log_ack(const unsigned char* ack, int n){
     mp_log(b);
 }
 
+static int g_mp_started;   /* v164: 前置声明（定义在后面），失败时要能复位 */
+
 static void* mp_thread(void* arg){
     (void)arg;
     char host[96]; snprintf(host, sizeof(host), "%s", g_host);
@@ -662,24 +696,42 @@ static void* mp_thread(void* arg){
 
     struct addrinfo hints, *res = NULL;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
+    hints.ai_family = AF_UNSPEC; hints.ai_socktype = SOCK_DGRAM;   /* v162: 允许 IPv6 */
     char ps[16]; snprintf(ps,sizeof(ps),"%d",port);
-    if(getaddrinfo(host, ps, &hints, &res) != 0 || !res){
-        snprintf(b,sizeof(b),"mp: DNS failed for %s\n", host); mp_log(b); return NULL;
+    { int gi = getaddrinfo(host, ps, &hints, &res);
+      if(gi != 0 || !res){
+        snprintf(b,sizeof(b),"mp: DNS failed for %s (gai=%d)\n", host, gi); mp_log(b);
+        g_mp_started = 0; return NULL;
+      } }
+    /* v164: 照抄端游的连接机制 —— 逐个候选地址试（域名常同时给 A 和 AAAA），
+     * 失败也要复位 g_mp_started，否则一次失败之后所有重试都被挡在门外。 */
+    { struct addrinfo* ai = NULL; int cand = 0;
+      for(ai = res; ai; ai = ai->ai_next){
+          cand++;
+          int fd = socket(ai->ai_family, SOCK_DGRAM, 0);
+          if(fd < 0) continue;
+          if(connect(fd, ai->ai_addr, ai->ai_addrlen) == 0){
+              char ip[64] = "?"; void* src = NULL; int fam = ai->ai_family;
+              g_fd = fd;
+              if(fam == AF_INET6) src = &((struct sockaddr_in6*)ai->ai_addr)->sin6_addr;
+              else if(fam == AF_INET) src = &((struct sockaddr_in*)ai->ai_addr)->sin_addr;
+              if(src) inet_ntop(fam, src, ip, sizeof(ip));
+              snprintf(b,sizeof(b),"mp: resolved %s -> [%s]:%d af=%d cand=%d\n", host, ip, port, fam, cand); mp_log(b);
+              snprintf(g_dg_addr,sizeof(g_dg_addr),"%s",ip); g_dg_af = fam; g_dg_cand = cand;
+              break;
+          }
+          close(fd);
+      }
+      freeaddrinfo(res); }
+    if(g_fd < 0){
+        snprintf(b,sizeof(b),"mp: connect failed errno=%d (all candidates tried)\n", errno); mp_log(b);
+        g_mp_started = 0; return NULL;
     }
-    g_fd = socket(AF_INET, SOCK_DGRAM, 0);
-    if(g_fd < 0){ mp_log("mp: socket failed\n"); freeaddrinfo(res); return NULL; }
-    if(connect(g_fd, res->ai_addr, res->ai_addrlen) != 0){
-        snprintf(b,sizeof(b),"mp: connect failed errno=%d\n", errno); mp_log(b); freeaddrinfo(res); return NULL;
-    }
-    struct sockaddr_in sa; memcpy(&sa, res->ai_addr, sizeof(sa)); freeaddrinfo(res);
-    { char ip[32]; inet_ntop(AF_INET, &sa.sin_addr, ip, sizeof(ip));
-      snprintf(b,sizeof(b),"mp: resolved %s -> %s:%d\n", host, ip, port); mp_log(b); }
 
     int fl = fcntl(g_fd, F_GETFL, 0); fcntl(g_fd, F_SETFL, fl | O_NONBLOCK);
 
     g_kcp = ikcp_create((IUINT32)(mp_now_ms() & 0x7fffffff), NULL);
-    if(!g_kcp){ mp_log("mp: ikcp_create failed\n"); return NULL; }
+    if(!g_kcp){ mp_log("mp: ikcp_create failed\n"); g_mp_started = 0; return NULL; }
     ikcp_setoutput(g_kcp, mp_output);
     ikcp_nodelay(g_kcp, 1, 10, 0, 1);
     ikcp_wndsize(g_kcp, 256, 256);
@@ -756,6 +808,7 @@ static void* mp_thread(void* arg){
                         float rot; memcpy(&rot,q,4); q+=4;
                         float av = 0.0f;                       /* v78: primary 末尾带角速度 */
                         if(q + 4 <= f + plen){ memcpy(&av,q,4); q+=4; }
+                        g_rx_primary++;
                         mp_remote_t* rs = remote_slot(rid);
                         rs->x=px; rs->y=py; rs->vx=vx; rs->vy=vy; rs->rot=rot; rs->valid=1;
                         { mp_rrocket_t* rp = rr_find(rid);   /* v74: 结构已到时同步位置 */
@@ -782,6 +835,11 @@ static void* mp_thread(void* arg){
                     } else {
                         snprintf(b,sizeof(b),"mp: packet type=%d len=%d\n", ptype, plen); mp_log(b);
                     }
+                } else if(kind == 4 /*Ping —— v174: 必须原样回 Pong，否则服务端 30s 判死*/){
+                    unsigned char pf[600];
+                    int pn2 = build_frame_bits(pf, sizeof(pf), 5, (int)r_u32(f+5), f+13, payloadBits);
+                    if(pn2 > 0) send_msg(pf, pn2);
+                    { static int pings = 0; if(pings < 3){ pings++; snprintf(b,sizeof(b),"mp: ping -> pong seq=%u bits=%d n=%d\n", r_u32(f+5), payloadBits, pn2); mp_log(b);} }
                 } else if(kind == 5 /*Pong*/){
                     snprintf(b,sizeof(b),"mp: pong n=%d\n", plen); mp_log(b);
                 }
@@ -790,6 +848,13 @@ static void* mp_thread(void* arg){
         if(!got_ack && now - last_log > 3000){
             last_log = now;
             mp_log("mp: waiting ack...\n");
+        }
+        /* v174: 8 秒收不到任何包 -> 退出循环复位 g_mp_started，玩家再点一次即可重连（原来循环永不退出，被踢后永久卡死） */
+        unsigned long long rx_age = (now > g_last_rx_ms) ? (now - g_last_rx_ms) : 0;   /* now 是本轮开始时刻，可能小于刚更新的 rx 时刻，必须防无符号回绕 */
+        if(got_ack && g_last_rx_ms && rx_age > 8000){
+            snprintf(b,sizeof(b),"mp: rx timeout %llums -> allow reconnect\n", rx_age);
+            mp_log(b);
+            break;
         }
         if(got_ack && g_have_pose && mp_structure_ready() && !g_create_sent){
             if(mp_send_create_rocket() > 0){
@@ -817,6 +882,7 @@ static void* mp_thread(void* arg){
         usleep(10000);
     }
     mp_log("mp: thread exit\n");
+    g_mp_started = 0;   /* v164: 允许再次连接 */
     return NULL;
 }
 
@@ -828,8 +894,19 @@ void mp_net_connect(const char* hostport){
     g_mp_started = 1;
     if(hostport && hostport[0]){
         snprintf(g_host, sizeof(g_host), "%s", hostport);
-        char* c = strchr(g_host, ':');
-        if(c){ *c = 0; g_port = atoi(c+1); }
+        /* v162: IPv6 —— 支持 [2001:db8::1]:9806、2001:db8::1（默认端口）、host:port、纯 IPv4 */
+        if(g_host[0] == '['){
+            char* rb = strchr(g_host, ']');
+            if(rb){
+                *rb = 0;
+                memmove(g_host, g_host+1, strlen(g_host));
+                if(rb[1] == ':') g_port = atoi(rb+2);
+            }
+        } else {
+            int colons = 0; const char* q = g_host;
+            while(*q){ if(*q == ':') colons++; q++; }
+            if(colons == 1){ char* c = strchr(g_host, ':'); if(c){ *c = 0; g_port = atoi(c+1); } }
+        }
     }
     if(pthread_create(&g_mp_thread, NULL, mp_thread, NULL) == 0) pthread_detach(g_mp_thread);
 }

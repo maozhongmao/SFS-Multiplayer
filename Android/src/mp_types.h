@@ -14,12 +14,23 @@
 
 typedef struct { unsigned long long t; double x, y, vx, vy; float rot, av; } mp_snap_t;
 
+#define MP_RV_NUM 12
+#define MP_RV_TOG 8
+#define MP_RV_TXT 4
+typedef struct { char name[28]; double v; } mp_rnum_t;
+typedef struct { char name[28]; int v; } mp_rtog_t;
+typedef struct { char name[28]; char val[40]; } mp_rtxt_t;
+
 typedef struct {
     int   id;                   /* 服务端/对端给的 part id（joints/stages 用它引用零件） */
     char  name[40];
     float x, y;                 /* position (Vector2) */
     float ox, oy, oz;           /* orientation */
     float temp;                 /* temperature */
+    int nnv, ntv, nxv;          /* v161: 下行变量字典条目数（燃料/电量/帆/着陆腿等） */
+    mp_rnum_t nv[MP_RV_NUM];
+    mp_rtog_t tv[MP_RV_TOG];
+    mp_rtxt_t xv[MP_RV_TXT];
 } mp_rpart_t;
 
 typedef struct { int a, b; } mp_rjoint_t;
@@ -75,6 +86,8 @@ typedef struct { int stage_id; int n; int ids[MP_UP_STAGE_IDS]; } mp_up_stage_t;
 
 /* mp_net.c 实现，v64.c 调用 */
 int          mp_rr_count(void);
+int          mp_rx_primary_count(void);   /* v163: 收到的 primary 包总数 */
+void         mp_diag(char* out, int cap); /* v166: 一行连接诊断，给屏幕 toast 用 */
 mp_rrocket_t* mp_rr_at(int i);
 void         mp_rr_clear_dirty(int i);
 /* v78: 取渲染时刻（现在 - 120ms）的插值位姿；返回 0 表示没有可用快照 */

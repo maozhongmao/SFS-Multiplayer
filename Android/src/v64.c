@@ -254,7 +254,7 @@ extern unsigned long long mp_last_rx_age_ms(void);
 extern double mp_server_world_time(void);   /* v97 */
 static void* g_srcBtn=NULL; static void* g_mEvtInvoke=NULL; static int g_autoStarted=0;
 /* ---- v64: enter the world through the game's own scene loader ---- */
-static void* g_sceneLoaderCls=NULL, *g_typeSceneLoader=NULL, *g_mLoadWorldScene=NULL;
+static void* g_sceneLoaderCls=NULL, *g_typeSceneLoader=NULL, *g_mLoadWorldScene=NULL, *g_mLoadHubScene=NULL;
 /* v100: 进世界前把视角钉到发射台（PC 端 DivertLoading 同款：WorldView.main.SetViewLocation(Base.planetLoader.spaceCenter.LaunchPadLocation)）
  * WorldView = SFS.World.ZIMVTWPJZBTPPXSR（dump.cs:26023），静态 main @0x0，SetViewLocation(Location) RVA 0x16CC208（dump.cs:26115）
  * Base = SFS.RQOFTSKFXWRDBQCA（dump.cs:40945），planetLoader @0x40（dump.cs:40952）
@@ -308,11 +308,24 @@ static void ux_connect_started(void);
 static void dump_rockets(void);
 static void publish_local_pose(void){
     if(!g_rockCls || !g_rockType || !g_findMethod || !g_mGetValue || g_offLoc < 0) return;
-    void* e=NULL; void* p[1]; p[0]=g_rockType;
-    void* arr=g_ri(g_findMethod, NULL, p, &e);
-    if(!arr || e) return;
-    int n=(int)g_alg(arr);
-    if(n <= 0) return;
+    /* v167: 平滑 —— 这个函数原来每 30 帧才被调一次（60fps 下 2Hz，30fps 下正好 1Hz，
+     * 就是用户看到的"一秒同步一次"）。现在改成每 2 帧采一次，
+     * 而 FindObjectsOfType 这种重调用只在走兜底路径时才做（主路径用 PlayerController.main，
+     * 不需要遍历场景）。 */
+    void* arr=NULL;
+    int n=0;
+    {
+        static int scanN=0;
+        int needScan = !(g_pcCls && g_pcMainField);
+        if(!needScan && (scanN++ % 60) == 0) needScan = 1;
+        if(needScan){
+            void* e0=NULL; void* p0[1]; p0[0]=g_rockType;
+            arr=g_ri(g_findMethod, NULL, p0, &e0);
+            if(!arr || e0) return;
+            n=(int)g_alg(arr);
+            if(n <= 0) return;
+        }
+    }
     /* v109: 只上传"我自己真正操控的那枚火箭"的位置。
      *
      * 历史教训：v108 及以前盲取数组第 0 个 —— 场上只要留着一枚残留的远端火箭
@@ -356,7 +369,7 @@ static void publish_local_pose(void){
                 }
             }
         }
-        if(!ro && !pickHow){
+        if(!ro && !pickHow && arr){
             /* 旧路径兜底：PlayerController 没解析到时才退回去猜 hasControl（带排除） */
             void** data=(void**)((char*)arr+0x20);
             for(int i=0;i<n;i++){
@@ -386,7 +399,7 @@ static void publish_local_pose(void){
     if(!ro) return;   /* 没有"我的火箭"就一帧都不报，绝不用别人的坐标顶上 */
     void* loc=*(void**)((char*)ro + g_offLoc);
     if(!loc) return;
-    void* lv=g_ri(g_mGetValue, loc, NULL, &e);
+    { void* e=NULL; void* lv=g_ri(g_mGetValue, loc, NULL, &e);
     if(!lv || e) return;
     double t=*(double*)((char*)lv+0x10);
     double px=*(double*)((char*)lv+0x20), py=*(double*)((char*)lv+0x28);
@@ -470,7 +483,7 @@ static void publish_local_pose(void){
     }
     (void)t;
     mp_set_local_pose(px, py, vx, vy, pname, rot);
-    mp_set_local_angular(av);
+    mp_set_local_angular(av); }
     if(!g_stUploaded) upload_structure(ro);      /* v73: 第一次拿到本机火箭就把结构发上去 */
 }
 
@@ -1464,6 +1477,19 @@ static void mainmenu_button(void)
             { float v = pw; void* p[1]; p[0]=&v; g_ri(g_mLeSetPrefW, leCln, p, &e); }
             if (g_mLeSetPrefH) { float v = ph; void* p[1]; p[0]=&v; g_ri(g_mLeSetPrefH, leCln, p, &e); }
             snprintf(b,sizeof(b),"v132: LayoutElement prefW=%.1f prefH=%.1f copied\n", pw, ph); log_app(b);
+        } else if (!leSrc && g_mGetRect && srcTr && g_mAddComponent) {
+            /* v160: 源按钮本身没有 LayoutElement（VerticalLayoutGroup 按文本定宽）——
+             * 给克隆加一个，宽高抄源按钮实测 Rect，这样布局组不会按「多人联机」的字数把它压窄。 */
+            void* e3=NULL; void* rr1=g_ri(g_mGetRect, srcTr, NULL, &e3);
+            if (rr1 && !e3) {
+                float* rf=(float*)g_unbox(rr1); float w=rf[2], h=rf[3];
+                e3=NULL; leCln=g_ri(g_mAddComponent, clone, tp, &e3);
+                if (leCln && !e3) {
+                    float v=w;  void* p1[1]; p1[0]=&v;  g_ri(g_mLeSetPrefW, leCln, p1, &e3);
+                    if (g_mLeSetPrefH) { float v2=h; void* p2[1]; p2[0]=&v2; g_ri(g_mLeSetPrefH, leCln, p2, &e3); }
+                    snprintf(b,sizeof(b),"v159: LayoutElement ADDED prefW=%.1f prefH=%.1f exc=%p\n", w, h, e3); log_app(b);
+                }
+            }
         } else {
             snprintf(b,sizeof(b),"v132: LayoutElement src=%p clone=%p (skip)\n", leSrc, leCln); log_app(b);
         }
@@ -2209,13 +2235,21 @@ static void connect_and_enter_world(void){
      *       -> hook_update 下一帧 Base.sceneLoader.LoadWorldScene(false)
      * 临时沙盒世界（sfsmp_tmp）由 ensure_tmp_world() 现造，退出删。
      * 之前 v85 把这段清空了，所以「连上但进不去世界」。 */
+    /* v171: 只连服务器，**不碰任何场景/界面**。
+     * 之前两种做法都错：
+     *   - v97/v169 调 WorldBaseManager.EnterWorld("sfsmp_tmp") → 直接进世界，跳过世界列表/航天大楼/建造蓝图；
+     *   - v168 调 wc_open_list() 替玩家点「开始游戏」→ 在 mode 20 下没被接受，人卡在主菜单。
+     * 现在把"进场"完全交回给游戏自己的按钮：玩家自己点「开始游戏」→ 世界列表 → 航天大楼 → 建造蓝图。
+     * 我们只负责连接；等玩家真的进了世界（scene=World_Mobile），位姿同步与远端生成自动开始。 */
+    /* v173: 连服务器 + 按官方链路进场，但**落在航天大楼**（不是世界）：
+     * EnterWorld(存档世界名) → 回调 → SceneLoader.LoadHubScene(false×4)。
+     * 于是 世界列表→航天大楼→建造蓝图 都在，玩家点发射才真正进 World_Mobile 开始同步。 */
     if (!g_enterTried) {
-        log_app("v97: entering world via official EnterWorld chain\n");
+        log_app("v173: EnterWorld chain -> LoadHubScene (航天大楼)\n");
         enter_world_official();
     } else {
-        log_app("v97: enter already tried once, skip\n");
+        log_app("v173: enter already tried once, skip\n");
     }
-    log_app("v97: connect requested (world entry handled by EnterWorld chain)\n");
 }
 
 /* ---- v65: real callback for the input dialog ------------------------------------------
@@ -2586,6 +2620,11 @@ static int g_selfTested = 0;
 static void* g_mLocDataCtor=NULL, *g_mPartSaveCtor=NULL, *g_mJointSaveCtor=NULL, *g_mStageSaveCtor=NULL;
 static void* g_mRsCtor0=NULL, *g_mOriCtor=NULL;
 static void* (*g_elemClsOf)(void*)=NULL;
+/* v161: PartSave 三个变量字典（燃料/电量/帆/着陆腿等状态） */
+static void* g_dictNumCls=NULL, *g_dictTogCls=NULL, *g_dictTxtCls=NULL;
+static void* g_mDictNumCtor=NULL, *g_mDictTogCtor=NULL, *g_mDictTxtCtor=NULL;
+static void* g_mAddNum=NULL, *g_mAddTog=NULL, *g_mAddTxt=NULL;
+static int g_rvLogged = 0;
 static int   g_rrSpawned[MP_RR_MAX];
 /* v110: g_rrRocket[] 已前置声明在 publish_local_pose 之前，这里不再重复定义 */
 static int   g_rrTries[MP_RR_MAX];
@@ -2649,6 +2688,37 @@ static void* rr_mk_part(mp_rpart_t* pt){
             *(void**)((char*)ps+0x20)=ori;
         }
     }
+    /* v161: 变量字典落地 —— 不做的话燃料/电量/帆/着陆腿全是默认值 */
+    if(pt->nnv>0 && g_dictNumCls && g_mAddNum && g_mDictNumCtor){
+        void* d=g_mNewObj(g_dictNumCls);
+        if(d){ void* e=NULL; g_ri(g_mDictNumCtor,d,NULL,&e); int k;
+            for(k=0;k<pt->nnv && k<MP_RV_NUM;k++){
+                double dv=pt->nv[k].v; void* a[2]; a[0]=g_sNew(pt->nv[k].name); a[1]=&dv; e=NULL;
+                g_ri(g_mAddNum,d,a,&e);
+            }
+            *(void**)((char*)ps+0x30)=d; }
+    }
+    if(pt->ntv>0 && g_dictTogCls && g_mAddTog && g_mDictTogCtor){
+        void* d=g_mNewObj(g_dictTogCls);
+        if(d){ void* e=NULL; g_ri(g_mDictTogCtor,d,NULL,&e); int k;
+            for(k=0;k<pt->ntv && k<MP_RV_TOG;k++){
+                unsigned char bv=(unsigned char)(pt->tv[k].v?1:0); void* a[2]; a[0]=g_sNew(pt->tv[k].name); a[1]=&bv; e=NULL;
+                g_ri(g_mAddTog,d,a,&e);
+            }
+            *(void**)((char*)ps+0x38)=d; }
+    }
+    if(pt->nxv>0 && g_dictTxtCls && g_mAddTxt && g_mDictTxtCtor){
+        void* d=g_mNewObj(g_dictTxtCls);
+        if(d){ void* e=NULL; g_ri(g_mDictTxtCtor,d,NULL,&e); int k;
+            for(k=0;k<pt->nxv && k<MP_RV_TXT;k++){
+                void* a[2]; a[0]=g_sNew(pt->xv[k].name); a[1]=g_sNew(pt->xv[k].val); e=NULL;
+                g_ri(g_mAddTxt,d,a,&e);
+            }
+            *(void**)((char*)ps+0x40)=d; }
+    }
+    if(!g_rvLogged && (pt->nnv||pt->ntv||pt->nxv)){
+        g_rvLogged=1; char vb[160];
+        snprintf(vb,sizeof(vb),"v161: first part vars nv=%d tv=%d xv=%d name='%s'\n",pt->nnv,pt->ntv,pt->nxv,pt->name); log_app(vb); }
     return ps;
 }
 
@@ -2893,6 +2963,12 @@ static void rr_try_spawn(int i){
 static int g_uxJoined = 0, g_uxStale = 0, g_uxNoJoin = 0, g_uxTried = 0;
 static unsigned long long g_uxTryMs = 0;
 static void ux_poll_conn(void){
+    /* v166: 没 adb 也能看结论 —— 连不上时每 5 秒把一行诊断弹成 toast */
+    if(g_ready && g_uxTried && !mp_is_joined()){
+        static int lastf = -9999;
+        int fnow = (int)g_frame;
+        if(fnow - lastf > 300){ lastf = fnow; char dg[200]; mp_diag(dg, sizeof(dg)); toast(dg); }
+    }
     if(!g_ready) return;
     if(strstr(g_sceneName, "World_Mobile")){
         if(mp_is_joined() && !g_uxJoined){ g_uxJoined = 1; g_uxNoJoin = 1; toast("联机：已连接服务器"); }
@@ -2903,7 +2979,16 @@ static void ux_poll_conn(void){
             g_uxStale = 1; toast("联机：与服务器断开");
         }
     } else {
-        g_uxJoined = 0; g_uxStale = 0; g_uxNoJoin = 0;
+        /* v172: 不在世界里也要给反馈 —— v171 去掉自动进场后，连接成功在主菜单毫无提示，
+         * 玩家会以为"又连不上了"。这里在主菜单也提示"已连接"，并告诉他去点开始游戏。 */
+        g_uxStale = 0; g_uxNoJoin = 0;
+        if(g_uxTried && mp_is_joined() && !g_uxJoined){
+            g_uxJoined = 1;
+            toast("联机：已连接服务器（点「开始游戏」进场）");
+        } else if(g_uxTried && !mp_is_joined() && !g_uxNoJoin && mp_last_rx_age_ms() > 6000){
+            g_uxNoJoin = 1;
+            toast("联机：连接失败，检查地址/网络");
+        }
     }
 }
 static void ux_connect_started(void){ g_uxTried = 1; g_uxTryMs = 1; g_uxNoJoin = 0; toast("联机：正在连接服务器…"); }
@@ -3304,6 +3389,9 @@ static void hook_update(void* self){
     if (g_ready && !g_dumpDone && strstr(g_sceneName, "World_Mobile") && (f % 30) == 0 && g_rockCls) {
         g_dumpDone = 1; dump_rockets();
     }
+    /* v170: 回滚 v167 的 30Hz 采样 —— 装机后"进世界就崩"（tombstone #08 在 hook_update+18032，
+     * 栈上是 publish_local_pose 走 il2cpp 时踩到场景切换中的失效对象）。
+     * 先恢复 30 帧/次（1~2Hz）这个已验证可用的节奏，平滑另找不碰对象生命周期的做法。 */
     if (g_ready && (f % 30) == 0 && strstr(g_sceneName, "World_Mobile") && g_rockCls) publish_local_pose();
     if ((f % 15) == 0) ux_poll_conn();
     /* ---- v97: 刚进世界时把服务器快照的「世界时间」推给游戏 -------------------
@@ -3337,7 +3425,12 @@ static void hook_update(void* self){
     if (g_rrEnabled) {
         /* v74: 收到远端火箭结构就在世界里生成它（每 20 帧扫一次，失败最多 3 次） */
         if (g_ready && !g_selfTested && strstr(g_sceneName,"World_Mobile") && f > 900){ g_selfTested = 1; rr_selftest(); }
-        if (g_ready && (f % 20) == 0){ int rn = mp_rr_count(); for (int i = 0; i < rn; i++) rr_try_spawn(i); }
+        /* v173: 只在世界场景里生成远端火箭（航天大楼/建造蓝图里 FindObjectsOfType 会白卡帧） */
+        if (g_ready && strstr(g_sceneName,"World_Mobile") && (f % 20) == 0){ int rn = mp_rr_count(); for (int i = 0; i < rn; i++) rr_try_spawn(i); }
+    /* v163: 每 5 秒打一次下行频率（判断"一秒一次"到底卡在哪一段） */
+    if (g_ready && (f % 300) == 0){
+        static int lastc = 0; int c = mp_rx_primary_count();
+        char rb2[120]; snprintf(rb2,sizeof(rb2),"v163: rx primary %d in last 5s (total=%d)\n", c-lastc, c); log_app(rb2); lastc = c; }
         /* v77: 每 2 帧把远端位姿写回已生成的火箭；定期检查它是否被游戏销毁 */
         if (g_ready && strstr(g_sceneName, "World_Mobile")) {
             if ((f % 2) == 0) { int _rn = mp_rr_count(); for (int i = 0; i < _rn; i++) rr_sync_pose(i); }
@@ -3355,7 +3448,8 @@ static void hook_update(void* self){
     if (g_wcStep == 1) {
         if (--g_wcTimer <= 0) { wc_open_list(); g_wcStep = 2; g_wcTimer = 75; }
     } else if (g_wcStep == 2) {
-        if (--g_wcTimer <= 0) { wc_pick_card(); g_wcStep = 3; g_wcTimer = 120; }
+        /* v162: 不再自动点世界卡 —— 把「航天大楼」「建造蓝图」两个页面交回玩家 */
+        if (--g_wcTimer <= 0) { log_app("v162: world list opened -> hand over to player\n"); g_wcStep = 0; }
     } else if (g_wcStep == 3) {
         if (--g_wcTimer <= 0) { g_wcStep = 0; log_app("v69: world-list route finished\n"); }
     }
@@ -3392,7 +3486,7 @@ static void hook_update(void* self){
         if (g_loadWorldTries >= 2) {          /* 回调那一帧先让游戏把 insideWorld 收尾做完 */
             g_wantLoadWorld = 0; g_loadWorldDone = 1;
             char b[220];
-            snprintf(b,sizeof(b),"v97: calling LoadWorldScene(false) after EnterWorld cb (tries=%d)\n", g_loadWorldTries); log_app(b);
+            snprintf(b,sizeof(b),"v173: calling LoadHubScene(false,false,false,false) after EnterWorld cb (tries=%d)\n", g_loadWorldTries); log_app(b);
             if (g_mLoadWorldScene && g_typeSceneLoader && g_ri && g_findMethod) {
                 void* p1[1]; p1[0] = g_typeSceneLoader; void* e2 = NULL;
                 void* arr = g_ri(g_findMethod, NULL, p1, &e2);
@@ -3400,10 +3494,12 @@ static void hook_update(void* self){
                 snprintf(b,sizeof(b),"v97: sceneLoader instances=%d exc=%p\n", n, e2); log_app(b);
                 if (arr && !e2 && n > 0) {
                     void* inst = ((void**)((char*)arr + 0x20))[0];
-                    int32_t zero = 0; void* pa[1]; pa[0] = &zero; void* e3 = NULL;
-                    void* r = g_ri(g_mLoadWorldScene, inst, pa, &e3);
-                    snprintf(b,sizeof(b),"v97: LoadWorldScene ret=%p exc=%p inst=%p\n", r, e3, inst); log_app(b);
-                    if (e3) log_exc(e3, "v97:");
+                    int32_t f4[4] = {0,0,0,0}; void* pa[4]; pa[0]=&f4[0]; pa[1]=&f4[1]; pa[2]=&f4[2]; pa[3]=&f4[3];
+                    void* e3 = NULL; void* r = NULL;
+                    if (g_mLoadHubScene) r = g_ri(g_mLoadHubScene, inst, pa, &e3);
+                    else r = g_ri(g_mLoadWorldScene, inst, pa, &e3);   /* 兜底 */
+                    snprintf(b,sizeof(b),"v173: scene ret=%p exc=%p inst=%p hub=%d\n", r, e3, inst, g_mLoadHubScene?1:0); log_app(b);
+                    if (e3) log_exc(e3, "v173:");
                 }
             } else log_app("v97: LoadWorldScene plumbing missing\n");
         }
@@ -3952,7 +4048,9 @@ static void* worker(void* arg){
             g_mAnchorMaxGet=gm(g_rectCls,"get_anchorMax",0); g_mAnchorMaxSet=gm(g_rectCls,"set_anchorMax",1);
             g_mPivotGet=gm(g_rectCls,"get_pivot",0);         g_mPivotSet=gm(g_rectCls,"set_pivot",1); }
         /* v132: LayoutElement（布局组真正读取的首选尺寸） */
-        g_leCls = cf(coreImg,"UnityEngine.UI","LayoutElement");
+        /* v159: LayoutElement 在 UnityEngine.UI 程序集里，coreImg 里找不到（此前一直 cls=0x0） */
+        g_leCls = uiI ? cf(uiI,"UnityEngine.UI","LayoutElement") : NULL;
+        if(!g_leCls) g_leCls = cf(coreImg,"UnityEngine.UI","LayoutElement");
         if(!g_leCls) g_leCls = cf(coreImg,"UnityEngine","LayoutElement");
         if(g_leCls){
             g_typeLE=tgo(cgt(g_leCls));
@@ -4038,6 +4136,20 @@ static void* worker(void* arg){
             if(fJoints && g_elemClsOf) g_jointSaveCls = g_elemClsOf(tgoc(fgt(fJoints)));
             if(fStages && g_elemClsOf) g_stageSaveCls = g_elemClsOf(tgoc(fgt(fStages)));
             if(g_partSaveCls){ void* fo=cgfn(g_partSaveCls,"orientation"); if(fo) g_oriCls=tgoc(fgt(fo)); }
+            /* v161: 变量字典类从 PartSave 的字段类型反推（Dictionary<string,double/bool/string>） */
+            if(g_partSaveCls){
+                void* f1=cgfn(g_partSaveCls,"NUMBER_VARIABLES");
+                void* f2=cgfn(g_partSaveCls,"TOGGLE_VARIABLES");
+                void* f3=cgfn(g_partSaveCls,"TEXT_VARIABLES");
+                if(f1) g_dictNumCls=tgoc(fgt(f1));
+                if(f2) g_dictTogCls=tgoc(fgt(f2));
+                if(f3) g_dictTxtCls=tgoc(fgt(f3));
+                if(g_dictNumCls){ g_mDictNumCtor=g_gm?g_gm(g_dictNumCls,".ctor",0):NULL; g_mAddNum=g_gm?g_gm(g_dictNumCls,"Add",2):NULL; }
+                if(g_dictTogCls){ g_mDictTogCtor=g_gm?g_gm(g_dictTogCls,".ctor",0):NULL; g_mAddTog=g_gm?g_gm(g_dictTogCls,"Add",2):NULL; }
+                if(g_dictTxtCls){ g_mDictTxtCtor=g_gm?g_gm(g_dictTxtCls,".ctor",0):NULL; g_mAddTxt=g_gm?g_gm(g_dictTxtCls,"Add",2):NULL; }
+                snprintf(b,sizeof(b),"v161: dict num=%p/%p tog=%p/%p txt=%p/%p\n",
+                         g_dictNumCls,g_mAddNum,g_dictTogCls,g_mAddTog,g_dictTxtCls,g_mAddTxt); log_app(b);
+            }
             /* Int32 类：coreImg 未必是 corlib，用 StageSave.partIndexes 的 int[] 元素类反推 */
             g_int32Cls = cf(coreImg,"System","Int32");
             if(!g_int32Cls && g_stageSaveCls && g_elemClsOf){
@@ -4104,6 +4216,9 @@ static void* worker(void* arg){
         g_worldViewCls,g_worldViewMainField,g_mSetViewLocation,g_baseCls,g_typeBase,(int)g_offPlanetLoader,g_plCls,(int)g_offSpaceCenter,g_scDataCls,g_mGetLaunchPad); log_app(vb); }
             g_mLoadWorldScene = gm(g_sceneLoaderCls,"LoadWorldScene",1);
             if(!g_mLoadWorldScene) g_mLoadWorldScene = gm(g_sceneLoaderCls,"LoadWorldScene",0);
+            /* v173: 航天大楼 —— SceneLoader.LoadHubScene(bool,bool,bool,bool) RVA 0x16EE1CC (dump.cs:29000) */
+            g_mLoadHubScene = gm(g_sceneLoaderCls,"LoadHubScene",4);
+            snprintf(b,sizeof(b),"v173: LoadHubScene=%p LoadWorldScene=%p\n", g_mLoadHubScene, g_mLoadWorldScene); log_app(b);
             snprintf(b,sizeof(b),"v64: sceneLoader cls=%p type=%p LoadWorldScene=%p\n",
                      g_sceneLoaderCls,g_typeSceneLoader,g_mLoadWorldScene);
             log_app(b);
