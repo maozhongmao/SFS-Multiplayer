@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package com.sfsmp.bridge;
 
 /** UI 线程心跳：native 侧 poll_click 靠它每帧驱动（16ms ≈ 60fps）。 */

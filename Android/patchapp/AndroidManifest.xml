@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!-- versionCode / versionName 不写在这里：由 build.ps1 从 VERSION 文件算出，
      再用 aapt2 link 的版本参数注入（每次构建第 4 段 +1）。 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"

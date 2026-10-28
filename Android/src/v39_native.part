@@ -1,0 +1,124 @@
+/* ================= v39: native window via the game's factory ================= */
+static void* g_mOpen=NULL, *g_mDrawTitle=NULL, *g_mDrawText2=NULL;
+static void* (*g_gm)(void*, const char*, int)=NULL;
+static void* g_delFuncBool=NULL, *g_delActionPanel=NULL, *g_delAction=NULL;
+static void* (*g_mObjGetClass)(void*)=NULL;
+static const char* (*g_mClassGetName)(void*)=NULL;
+
+static int32_t v39_tramp_bool(void* a, void* b, void* c, void* d){ (void)a;(void)b;(void)c;(void)d; return 1; }
+static void v39_tramp_action(void* a, void* b, void* c, void* d){ (void)a;(void)b;(void)c;(void)d; log_app("v39: action trampoline\n"); }
+
+static void v39_draw_title(void* p, const char* s)
+{
+    void* exc = NULL; void* a0 = g_sNew ? g_sNew(s) : NULL;
+    void* ip[1]; ip[0] = a0;
+    if (g_mDrawTitle && a0) g_ri(g_mDrawTitle, p, ip, &exc);
+    { char b[160]; snprintf(b,sizeof(b),"v39: DrawTitle('%s') exc=%p\n", s, exc); log_app(b); }
+}
+
+static void v39_draw_text(void* p, int slot, const char* s)
+{
+    void* exc = NULL; int32_t i0 = slot; void* a1 = g_sNew ? g_sNew(s) : NULL;
+    void* ip[2]; ip[0] = &i0; ip[1] = a1;
+    if (g_mDrawText2 && a1) g_ri(g_mDrawText2, p, ip, &exc);
+    { char b[200]; snprintf(b,sizeof(b),"v39: DrawText(%d) exc=%p\n", slot, exc); log_app(b); }
+}
+
+static void v39_draw_button(void* p, int slot, const char* s)
+{
+    void* exc = NULL; int32_t i0 = slot; void* a1 = g_sNew ? g_sNew(s) : NULL;
+    void* a2 = g_delAction; int32_t a3 = 1;
+    void* ip[4]; ip[0] = &i0; ip[1] = a1; ip[2] = a2; ip[3] = &a3;
+    if (g_mDrawFull && a1) g_ri(g_mDrawFull, p, ip, &exc);
+    { char b[200]; snprintf(b,sizeof(b),"v39: DrawFullButton(%d,'%s') exc=%p\n", slot, s, exc); log_app(b); }
+}
+
+static void v39_build(void* panel)
+{
+    char b[200];
+    snprintf(b,sizeof(b),"v39: BUILDER panel=%p\n", panel); log_app(b);
+    if (!panel) { log_app("v39: builder got null panel\n"); return; }
+    v39_draw_title(panel, "Multiplayer SFS - Join Menu");
+    v39_draw_text(panel, 0, "Native window test - built by libsfsmp");
+    v39_draw_button(panel, 1, "Join Server");
+    v39_draw_button(panel, 2, "Back");
+    log_app("v39: builder done\n");
+}
+
+static void v39_tramp_builder(void* a, void* b, void* c, void* d)
+{
+    void* cand[2]; int i;
+    (void)c; (void)d;
+    cand[0] = a; cand[1] = b;
+    for (i = 0; i < 2; ++i) {
+        void* o = cand[i];
+        void* k;
+        const char* kn;
+        if (!o) continue;
+        k = g_mObjGetClass ? g_mObjGetClass(o) : NULL;
+        kn = (k && g_mClassGetName) ? g_mClassGetName(k) : NULL;
+        if (kn && strstr(kn, "NOJZIZCFSEXSUEEX")) { v39_build(o); return; }
+    }
+    v39_build(a ? a : b);
+}
+
+static void* v39_make_delegate(void* delClass, void* fn)
+{
+    void* d;
+    if (!g_mNewObj || !delClass) return NULL;
+    d = g_mNewObj(delClass);
+    if (!d) return NULL;
+    *(void**)((char*)d + 0x10) = fn;
+    *(void**)((char*)d + 0x18) = fn;
+    if (g_doffMethodCode >= 0) *(void**)((char*)d + 0x40) = fn;
+    return d;
+}
+
+static void native_window_test(void)
+{
+    char b[300]; void* exc = NULL; void* arr; void* params[1]; int n, i;
+    void* panel = NULL;
+    log_app("v39: ===== native window test =====\n");
+    if (!g_panelCls || !g_typePanel) { log_app("v39: no panel class\n"); return; }
+    g_mOpen = g_gm ? g_gm(g_panelCls, "Open", 5) : NULL;
+    g_mDrawTitle = g_gm ? g_gm(g_panelCls, "DrawTitle", 1) : NULL;
+    g_mDrawText2 = g_gm ? g_gm(g_panelCls, "DrawText", 2) : NULL;
+    if (!g_mOpen) { log_app("v39: Open not found\n"); return; }
+    snprintf(b,sizeof(b),"v39: Open=%p Title=%p Text=%p DrawFull=%p\n", g_mOpen, g_mDrawTitle, g_mDrawText2, g_mDrawFull);
+    log_app(b);
+
+    params[0] = g_typePanel;
+    arr = g_ri(g_mFindAll, NULL, params, &exc);
+    n = (arr && !exc) ? (int)g_alg(arr) : 0;
+    for (i = 0; i < n; ++i) {
+        void* o = ((void**)((char*)arr + 0x20))[i];
+        if (!o) continue;
+        panel = o;
+        { char nm[40]; char_name(o, nm, 40);
+          snprintf(b,sizeof(b),"v39: panel[%d]=%p '%s'\n", i, o, nm); log_app(b); }
+        if (panel) break;
+    }
+    if (!panel) { log_app("v39: no panel instance\n"); return; }
+
+    if (!g_delFuncBool) {
+        void* t0 = g_mgp ? g_mgp(g_mOpen, 0) : NULL;
+        void* t1 = g_mgp ? g_mgp(g_mOpen, 1) : NULL;
+        void* t3 = g_mgp ? g_mgp(g_mOpen, 3) : NULL;
+        void* c0 = t0 ? g_tgoc(t0) : NULL;
+        void* c1 = t1 ? g_tgoc(t1) : NULL;
+        void* c3 = t3 ? g_tgoc(t3) : NULL;
+        g_delFuncBool = v39_make_delegate(c0, (void*)v39_tramp_bool);
+        g_delActionPanel = v39_make_delegate(c1, (void*)v39_tramp_builder);
+        g_delAction = v39_make_delegate(c3, (void*)v39_tramp_action);
+        snprintf(b,sizeof(b),"v39: delegates fb=%p ap=%p a=%p\n", g_delFuncBool, g_delActionPanel, g_delAction);
+        log_app(b);
+    }
+    if (!g_delFuncBool || !g_delActionPanel) { log_app("v39: delegate build failed\n"); return; }
+
+    { int32_t one = 1;
+      void* ip[5]; ip[0] = g_delFuncBool; ip[1] = g_delActionPanel; ip[2] = &one;
+      ip[3] = g_delAction; ip[4] = g_delAction;
+      log_app("v39: calling Open now...\n");
+      g_ri(g_mOpen, panel, ip, &exc);
+      snprintf(b,sizeof(b),"v39: Open returned exc=%p\n", exc); log_app(b); }
+}

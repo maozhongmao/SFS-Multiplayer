@@ -206,6 +206,19 @@ public static class P2PConnectionManager
                 DebugTrace.Note("peer " + peer.PlayerId + " fallback: " + peer.FallbackReason);
             }
 
+            // 【手机端兼容 2026-10-27】手机端没有 P2P 实现：服务端要么丢弃报价，要么对方一声不响。
+            // 以前必须干等 10 秒握手超时，表现为"连不上 / 卡几秒"。这里加一条"明显没人"的快速判定：
+            // 探针已发 >= 4 次、一个包都没收到、且创建已过 2 秒 -> 立刻 Fallback 走中继。
+            if (!peer.Active && !peer.Fallback
+                && peer.PacketsReceived == 0 && peer.ProbesSent >= 4
+                && now - peer.CreatedUtc >= TimeSpan.FromSeconds(2))
+            {
+                peer.Fallback = true;
+                peer.FallbackReason = "no reply to probes after 2s (peer has no P2P)";
+                DebugTrace.Note("peer " + peer.PlayerId + " fallback: " + peer.FallbackReason
+                    + " probes=" + peer.ProbesSent + " rx=" + peer.PacketsReceived);
+            }
+
             // 握手超时：10 秒仍未 Active 则标记 Fallback
             if (!peer.Active && !peer.Fallback && now >= peer.HandshakeDeadlineUtc)
             {

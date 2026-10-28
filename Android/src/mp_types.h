@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 #ifndef MP_TYPES_H
 #define MP_TYPES_H
 

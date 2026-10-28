@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 param([Parameter(Mandatory=$true)][string]$SoName)
 $ErrorActionPreference = 'Continue'
 $so  = "D:\SFS-Multiplayer\Server\cpp\build\so-out\$SoName.so"

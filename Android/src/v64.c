@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 // v43: SFS-Pro route — NOJ drawer Open()+Draw* ; v41: probe mode — no overlay button; auto-summon the cloned '多人联机' button when the main menu is ready; click -> login page.
 //   * the direct UnityEngine.Object.Instantiate call is DEAD (v28/v29: it dies inside libunity
 //     because an internal lookup returns NULL) - so let the game's own managed code do it.
@@ -20,6 +21,8 @@
 #include <dirent.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <pthread.h>
 #include <sys/mman.h>
 #include <stdint.h>
@@ -104,6 +107,9 @@ typedef const char* (*fn_tn)(void*);
 static void* g_orig_update = NULL;
 static void* g_findMethod = NULL, *g_typeObj = NULL, *g_rocketCls = NULL;
 static void* g_mGetRot = NULL, *g_mGetTransform = NULL, *g_mGetName = NULL;
+static void* g_mSetEuler = NULL; static int g_rotLogged = 0;   /* v152: 朝向修正 */
+/* v153: 可玩版位姿跟随 —— 不再每帧瞬移，偏差小就用速度追 */
+static double g_pvx = 0.0, g_pvy = 0.0; static int g_snap = 1; static int g_snapN = 0, g_pursueN = 0;
 static void* g_mGetChildCount = NULL, *g_mGetChild = NULL, *g_mGetValue = NULL, *g_mSetValue = NULL;
 static void* g_canvasCls = NULL, *g_typeCanvas = NULL;
 static void* g_rectCls = NULL, *g_typeRect = NULL, *g_mGetParent = NULL;
@@ -157,6 +163,12 @@ static void* g_cloneText=NULL;   /* v91: 克隆按钮上的文字组件，用来
 static void* g_mmCls=NULL, *g_mmInst=NULL, *g_mOpenCredits=NULL, *g_mmMainField=NULL;
 static void (*g_staticGet)(void*, void*) = NULL;
 static void* g_mGetSizeDelta=NULL, *g_mSetSizeDelta=NULL, *g_mGetLocalScale=NULL, *g_mSetLocalScale=NULL;
+/* v132: 让克隆按钮和源按钮一样宽 —— anchors / pivot / LayoutElement 三件套 */
+static void* g_mAnchorMinGet=NULL, *g_mAnchorMinSet=NULL, *g_mAnchorMaxGet=NULL, *g_mAnchorMaxSet=NULL;
+static void* g_mPivotGet=NULL, *g_mPivotSet=NULL;
+static void* g_leCls=NULL, *g_typeLE=NULL;
+static void* g_mLeGetPrefW=NULL, *g_mLeSetPrefW=NULL, *g_mLeGetPrefH=NULL, *g_mLeSetPrefH=NULL;
+static void* g_mAddComponent=NULL;
 static void* g_mGetRect=NULL;
 static int g_offClick=-1, g_offHold=-1;
 static volatile int g_pressed=0;
@@ -238,6 +250,7 @@ extern void mp_set_local_pose(double x, double y, double vx, double vy, const ch
 extern void mp_set_local_angular(float av);   /* v107 */
 extern void mp_net_connect(const char* hostport);
 extern int mp_is_joined(void);
+extern unsigned long long mp_last_rx_age_ms(void);
 extern double mp_server_world_time(void);   /* v97 */
 static void* g_srcBtn=NULL; static void* g_mEvtInvoke=NULL; static int g_autoStarted=0;
 /* ---- v64: enter the world through the game's own scene loader ---- */
@@ -289,6 +302,8 @@ static v73_joint_rec g_up_joints[4096];
 static v73_stage_rec g_up_stages[64];
 static void upload_structure(void* rocket);
 static void log_exc(void* exc, const char* tag);
+static void ux_poll_conn(void);
+static void ux_connect_started(void);
 
 static void dump_rockets(void);
 static void publish_local_pose(void){
@@ -427,9 +442,13 @@ static void publish_local_pose(void){
             }
             if(!g_rotEulerLogged){ g_rotEulerLogged=1;
                 char rb2[260]; snprintf(rb2,sizeof(rb2),"v114: rot rb.rotation=%.2f tr.eulerZ=%.2f eulerOk=%d angVel=%.3f -> using=%s\n",
-                    rot, eulerZ, eulerOk, av, eulerOk ? "euler" : "rb.rotation"); log_app(rb2); }
+                    rot, eulerZ, eulerOk, av, "rb.rotation"); log_app(rb2); }
             g_lastEulerOk = eulerOk;
-            if(eulerOk) rot = eulerZ;
+            /* v155: 实测（v114 日志）手机端 rb2d.rotation=45.07 而 transform.eulerAngles.z=0.00
+             * —— 这版 SFS 里刚体的旋转**不会**镜像到 transform，所以 euler 恒为 0。
+             * 之前"eulerOk 就用 euler"把真实角度 45° 换成了 0°，这就是"火箭永远朝上"的根因。
+             * 现在一律用 rb2d.rotation（真值），euler 只作日志参考。 */
+            (void)eulerZ;
             /* v118: 撤销 v115 的 rot -= 90。
              * bug-hunter 第二轮报告（docs/bug-rotation-90-round2.md）证明：
              * 90° 偏差不是角度本身错，而是选错了火箭（残留副本 vs 玩家真火箭，
@@ -1409,27 +1428,55 @@ static void mainmenu_button(void)
             g_ri(g_mSetLocalScale, ctr, p, &exc);
         }
     }
-    if (ctr && srcTr && g_mGetRect && g_mGetSizeDelta && g_mSetSizeDelta) {
-        void* r1 = g_ri(g_mGetRect, srcTr, NULL, &exc);
-        void* r2 = g_ri(g_mGetRect, ctr, NULL, &exc);
-        if (r1 && r2 && !exc) {
-            float* a = (float*)g_unbox(r1);
-            float* c = (float*)g_unbox(r2);
-            float srcW = a[2], clW = c[2];
-            snprintf(b,sizeof(b),"v36: rect src=%.1f clone=%.1f\n", srcW, clW); log_app(b);
-            if (clW > 0.1f) {
-                void* sd = g_ri(g_mGetSizeDelta, ctr, NULL, &exc);
-                if (sd && !exc) {
-                    float* v = (float*)g_unbox(sd);
-                    float sz[2] = { v[0] * (srcW / clW), v[1] };
-                    void* p[1]; p[0] = sz;
-                    g_ri(g_mSetSizeDelta, ctr, p, &exc);
-                    snprintf(b,sizeof(b),"v36: adjusted sizeDelta=%.1f,%.1f\n", sz[0], sz[1]); log_app(b);
-                }
-            }
+    /* v132: anchors / pivot 必须一起抄。只改 sizeDelta 的话，VerticalLayoutGroup
+       会按源锚点重排，把宽度又算回去 —— 这就是「按钮长度怎么改都不对」的根因。 */
+    if (ctr && srcTr) {
+        if (g_mAnchorMinGet && g_mAnchorMinSet) {
+            void* r = g_ri(g_mAnchorMinGet, srcTr, NULL, &exc);
+            if (r && !exc) { float* v = (float*)g_unbox(r); float a[2] = { v[0], v[1] };
+                void* p[1]; p[0] = a; g_ri(g_mAnchorMinSet, ctr, p, &exc);
+                snprintf(b,sizeof(b),"v132: anchorMin=%.2f,%.2f\n", a[0], a[1]); log_app(b); }
+        }
+        if (g_mAnchorMaxGet && g_mAnchorMaxSet) {
+            void* r = g_ri(g_mAnchorMaxGet, srcTr, NULL, &exc);
+            if (r && !exc) { float* v = (float*)g_unbox(r); float a[2] = { v[0], v[1] };
+                void* p[1]; p[0] = a; g_ri(g_mAnchorMaxSet, ctr, p, &exc);
+                snprintf(b,sizeof(b),"v132: anchorMax=%.2f,%.2f\n", a[0], a[1]); log_app(b); }
+        }
+        if (g_mPivotGet && g_mPivotSet) {
+            void* r = g_ri(g_mPivotGet, srcTr, NULL, &exc);
+            if (r && !exc) { float* v = (float*)g_unbox(r); float a[2] = { v[0], v[1] };
+                void* p[1]; p[0] = a; g_ri(g_mPivotSet, ctr, p, &exc);
+                snprintf(b,sizeof(b),"v132: pivot=%.2f,%.2f\n", a[0], a[1]); log_app(b); }
+        }
+    }
+    /* v132: 布局组真正用的是 LayoutElement.preferredWidth，不是 sizeDelta */
+    if (g_leCls && g_mGetComponent && g_typeLE && g_mLeGetPrefW && g_mLeSetPrefW) {
+        void* tp[1]; void* e = NULL;
+        tp[0] = g_typeLE;
+        void* leSrc = g_ri(g_mGetComponent, srcGo, tp, &e);
+        void* leCln = (e || !leSrc) ? NULL : g_ri(g_mGetComponent, clone, tp, &e);
+        if (leSrc && !leCln && g_mAddComponent) { e = NULL; leCln = g_ri(g_mAddComponent, clone, tp, &e); }
+        if (leSrc && leCln) {
+            float pw = 0.0f, ph = 0.0f;
+            { void* r = g_ri(g_mLeGetPrefW, leSrc, NULL, &e); if (r && !e) pw = *(float*)g_unbox(r); }
+            if (g_mLeGetPrefH && g_mLeSetPrefH) { void* r = g_ri(g_mLeGetPrefH, leSrc, NULL, &e); if (r && !e) ph = *(float*)g_unbox(r); }
+            { float v = pw; void* p[1]; p[0]=&v; g_ri(g_mLeSetPrefW, leCln, p, &e); }
+            if (g_mLeSetPrefH) { float v = ph; void* p[1]; p[0]=&v; g_ri(g_mLeSetPrefH, leCln, p, &e); }
+            snprintf(b,sizeof(b),"v132: LayoutElement prefW=%.1f prefH=%.1f copied\n", pw, ph); log_app(b);
+        } else {
+            snprintf(b,sizeof(b),"v132: LayoutElement src=%p clone=%p (skip)\n", leSrc, leCln); log_app(b);
         }
     }
     if (g_mForceRebuild && parent) { void* p[1]; p[0]=parent; g_ri(g_mForceRebuild, NULL, p, &exc); log_app("v35: layout rebuilt\n"); }
+    /* v132: rebuild 之后再量一次，宽度应当与源按钮一致（差值≈0 才算修好） */
+    if (g_mGetRect && srcTr && ctr) {
+        void* e20 = NULL;
+        void* r1 = g_ri(g_mGetRect, srcTr, NULL, &e20);
+        void* r2 = g_ri(g_mGetRect, ctr, NULL, &e20);
+        if (r1 && r2 && !e20) { float* a=(float*)g_unbox(r1); float* c=(float*)g_unbox(r2);
+            snprintf(b,sizeof(b),"v132: WIDTH src=%.1f clone=%.1f delta=%.1f\n", a[2], c[2], c[2]-a[2]); log_app(b); }
+    }
     if (g_mmCls && g_mmMainField && g_staticGet) { void* v=NULL; g_staticGet(g_mmMainField, &v); g_mmInst=v; }
     { char mb[120]; snprintf(mb,sizeof(mb),"v33: mainmenu inst=%p openCredits=%p\n",g_mmInst,g_mOpenCredits); log_app(mb); }
     g_cloneGo = clone; g_cloneBtn = cbtn; g_cloneRect = ctr;
@@ -2151,6 +2198,7 @@ static void connect_and_enter_world(void){
         return;
     }
     snprintf(b,sizeof(b),"v97: MP click -> connect '%s'\n", ep); log_app(b);
+    ux_connect_started();
     mp_net_connect(ep);
     g_enterWait = 0;
     g_enterLogs = 0;
@@ -2611,16 +2659,28 @@ static int rr_idx_of(mp_rrocket_t* rr, int pid){
     return -1;
 }
 
-/* 实测：服务端转发来的 part id 常常全是 0（服务端持久化/旧版丢 id），此时 joints 里的值是
- * 1 基下标（我们自己上传用的就是 i+1）。两种约定都兼容。 */
-static int rr_ids_usable(mp_rrocket_t* rr){
-    int i; if(rr->nparts <= 0) return 0;
-    for(i=0;i<rr->nparts;i++) if(rr->parts[i].id == 0) return 0;
-    return 1;
+/* 服务端转发可能丢 part id（全是 0），也可能把 1 基下标当 id 发下来。
+ * 不能只凭「有没有 0」猜，改成**按匹配数投票**：id 查表 / 1 基下标 / 0 基下标，
+ * 哪种解释能对上最多关节就用哪种，减少「零件散落」。 */
+#define RR_MAP_ID 0
+#define RR_MAP_1B 1
+#define RR_MAP_0B 2
+static int rr_map_mode(mp_rrocket_t* rr){
+    int m_id = 0, m_1 = 0, m_0 = 0, i;
+    if (rr->nparts <= 0) return RR_MAP_1B;
+    for (i = 0; i < rr->njoints; i++) {
+        int a = rr->joints[i].a, b = rr->joints[i].b;
+        if (rr_idx_of(rr, a) >= 0 && rr_idx_of(rr, b) >= 0) m_id++;
+        if (a >= 1 && a <= rr->nparts && b >= 1 && b <= rr->nparts) m_1++;
+        if (a >= 0 && a < rr->nparts && b >= 0 && b < rr->nparts) m_0++;
+    }
+    if (m_id > 0 && m_id >= m_1 && m_id >= m_0) return RR_MAP_ID;
+    return (m_1 >= m_0) ? RR_MAP_1B : RR_MAP_0B;
 }
-static int rr_jidx(mp_rrocket_t* rr, int v, int usable){
-    if(usable) return rr_idx_of(rr, v);
-    return (v >= 1 && v <= rr->nparts) ? (v - 1) : -1;
+static int rr_jidx(mp_rrocket_t* rr, int v, int mode){
+    if (mode == RR_MAP_ID) return rr_idx_of(rr, v);
+    if (mode == RR_MAP_1B) return (v >= 1 && v <= rr->nparts) ? (v - 1) : -1;
+    return (v >= 0 && v < rr->nparts) ? v : -1;
 }
 
 static void* rr_build_save(mp_rrocket_t* rr){
@@ -2661,17 +2721,17 @@ static void* rr_build_save(mp_rrocket_t* rr){
         if(ja0) *(void**)((char*)rs+0x40)=ja0;
     }
     if(g_jointSaveCls && rr->njoints>0){
-        int usable=rr_ids_usable(rr), valid=0, i;
+        int mode=rr_map_mode(rr), valid=0, i;
         for(i=0;i<rr->njoints;i++)
-            if(rr_jidx(rr,rr->joints[i].a,usable)>=0 && rr_jidx(rr,rr->joints[i].b,usable)>=0) valid++;
-        snprintf(b2,sizeof(b2),"v74: joints pid=(%d,%d) usable=%d mapped=%d/%d nparts=%d id0=%d\n",
-                 rr->joints[0].a, rr->joints[0].b, usable, valid, rr->njoints, rr->nparts,
+            if(rr_jidx(rr,rr->joints[i].a,mode)>=0 && rr_jidx(rr,rr->joints[i].b,mode)>=0) valid++;
+        snprintf(b2,sizeof(b2),"v130: joints pid=(%d,%d) mode=%d mapped=%d/%d nparts=%d id0=%d\n",
+                 rr->joints[0].a, rr->joints[0].b, mode, valid, rr->njoints, rr->nparts,
                  rr->nparts>0?rr->parts[0].id:0);
         log_app(b2);
         { void* ja=g_arrayNew(g_jointSaveCls,(uintptr_t)valid);
           if(ja){ void** d=(void**)((char*)ja+0x20); int k=0;
             for(i=0;i<rr->njoints && k<valid;i++){
-                int ia=rr_jidx(rr,rr->joints[i].a,usable), ib=rr_jidx(rr,rr->joints[i].b,usable);
+                int ia=rr_jidx(rr,rr->joints[i].a,mode), ib=rr_jidx(rr,rr->joints[i].b,mode);
                 if(ia<0||ib<0) continue;
                 void* je=g_mNewObj(g_jointSaveCls);
                 if(!je) continue;
@@ -2692,11 +2752,11 @@ static void* rr_build_save(mp_rrocket_t* rr){
                 if(g_mStageSaveCtor){ void* e=NULL; g_ri(g_mStageSaveCtor, se, NULL, &e); (void)e; }
                 *(int*)((char*)se+0x10)=rr->stages[i].stage_id;
                 if(g_int32Cls && g_arrayNew){
-                    int usable=rr_ids_usable(rr), n=0, k;
-                    for(k=0;k<rr->stages[i].n;k++) if(rr_jidx(rr,rr->stages[i].ids[k],usable)>=0) n++;
+                    int mode2=rr_map_mode(rr), n=0, k;
+                    for(k=0;k<rr->stages[i].n;k++) if(rr_jidx(rr,rr->stages[i].ids[k],mode2)>=0) n++;
                     void* ia=g_arrayNew(g_int32Cls,(uintptr_t)n);
                     if(ia){ int* p=(int*)((char*)ia+0x20); int w=0;
-                        for(k=0;k<rr->stages[i].n;k++){ int ix=rr_jidx(rr,rr->stages[i].ids[k],usable); if(ix>=0) p[w++]=ix; }
+                        for(k=0;k<rr->stages[i].n;k++){ int ix=rr_jidx(rr,rr->stages[i].ids[k],mode2); if(ix>=0) p[w++]=ix; }
                         *(void**)((char*)se+0x18)=ia; }
                 }
                 d[i]=se;
@@ -2825,7 +2885,28 @@ static void rr_try_spawn(int i){
     mp_rr_clear_dirty(i);
     snprintf(b,sizeof(b),"v122: spawned rocket=%p (existing=%d)\n", g_rrRocket[i], nsnap);
     log_app(b);
+    { char tb[96]; snprintf(tb,sizeof(tb),"联机：远端火箭已同步（%d 零件）", rr->nparts); toast(tb); }
 }
+
+/* v131: 连接状态提示（toast），只做「最容易注意到」的三件事：
+ * 连上 / 断开 / 连接超时。进入非世界场景时复位，方便下次重连再提示。 */
+static int g_uxJoined = 0, g_uxStale = 0, g_uxNoJoin = 0, g_uxTried = 0;
+static unsigned long long g_uxTryMs = 0;
+static void ux_poll_conn(void){
+    if(!g_ready) return;
+    if(strstr(g_sceneName, "World_Mobile")){
+        if(mp_is_joined() && !g_uxJoined){ g_uxJoined = 1; g_uxNoJoin = 1; toast("联机：已连接服务器"); }
+        if(!mp_is_joined() && g_uxTried && !g_uxNoJoin && mp_last_rx_age_ms() > 6000){
+            g_uxNoJoin = 1; toast("联机：连接超时，检查服务器地址");
+        }
+        if(g_uxJoined && !g_uxStale && mp_last_rx_age_ms() > 8000){
+            g_uxStale = 1; toast("联机：与服务器断开");
+        }
+    } else {
+        g_uxJoined = 0; g_uxStale = 0; g_uxNoJoin = 0;
+    }
+}
+static void ux_connect_started(void){ g_uxTried = 1; g_uxTryMs = 1; g_uxNoJoin = 0; toast("联机：正在连接服务器…"); }
 
 /* ================= v77: 让远端火箭跟着位姿包动 =================
  * 生成时只定了一次位置；此后每帧把 mp_net 解出的位姿写回去。
@@ -2896,6 +2977,8 @@ static void rr_sync_pose(int i){
             return; }
     }
     if(!mp_rr_sample(i, &ix, &iy, &irot)){ ix=rr->x; iy=rr->y; irot=rr->rot; }
+    /* v154: 角度归一化到 (-180,180]，否则插值跨 0/360 会多转一整圈 */
+    if(irot > 180.0f) irot -= 360.0f; else if(irot <= -180.0f) irot += 360.0f;
     /* v88: 绝对不要直接往 Location 组件本体写 double。
      * Location 组件布局：planet 0x20 / position(Double2_Local=Obs 引用) 0x28 / velocity 0x30，
      * 旧代码写 loc+0x20/0x28 就是拿位置 double 覆盖 planet 与 Obs 指针，
@@ -2915,6 +2998,14 @@ static void rr_sync_pose(int i){
             void* e5=NULL;
             void* lv=g_ri(g_mGetValue, loc, NULL, &e5);
             if(lv && !e5){
+                {   /* v153: 先读游戏当前的权威位置，再决定"瞬移对齐"还是"速度追" */
+                    double cx=*(double*)((char*)lv+0x20), cy=*(double*)((char*)lv+0x28);
+                    double dx2=ix-cx, dy2=iy-cy, err2=dx2*dx2+dy2*dy2;
+                    g_pvx = rr->vx + dx2*25.0;
+                    g_pvy = rr->vy + dy2*25.0;
+                    g_snap = (err2 > 4.0) ? 1 : 0;      /* 偏差 > 2 m 才整帧对齐 */
+                    if(g_snap) g_snapN++; else g_pursueN++;
+                }
                 *(double*)((char*)lv+0x20)=ix;      *(double*)((char*)lv+0x28)=iy;
                 *(double*)((char*)lv+0x30)=rr->vx;  *(double*)((char*)lv+0x38)=rr->vy;
                 void* av[1]; av[0]=lv; e5=NULL;
@@ -2958,13 +3049,27 @@ static void rr_sync_pose(int i){
      * 随后 set_PhysicsMode / trajectory.CheckEncounters（Physics.cs:50/194）就炸。
      * 位置和速度我们每帧自己写，本来就不需要关物理。 */
     (void)g_mRbSetSim; (void)g_skipSimOff;
-    if(g_mRbSetPos){ float p[2]; p[0]=(float)ix; p[1]=(float)iy; void* a[1]; a[0]=p; g_ri(g_mRbSetPos,rb,a,&e); }
-    if(g_mRbSetVel){ float v[2]; v[0]=(float)rr->vx; v[1]=(float)rr->vy; void* a[1]; a[0]=v; g_ri(g_mRbSetVel,rb,a,&e); }
+    if(g_mRbSetPos && g_snap){ float p[2]; p[0]=(float)ix; p[1]=(float)iy; void* a[1]; a[0]=p; g_ri(g_mRbSetPos,rb,a,&e); }
+    if(g_mRbSetVel){ float v[2]; v[0]=(float)g_pvx; v[1]=(float)g_pvy; void* a[1]; a[0]=v; g_ri(g_mRbSetVel,rb,a,&e); }
     if(g_mRbSetRot){ float rd=irot; void* a[1]; a[0]=&rd; g_ri(g_mRbSetRot,rb,a,&e); }
     if(g_mRbSetAng){ float av=rr->av; void* a[1]; a[0]=&av; g_ri(g_mRbSetAng,rb,a,&e); }
+    /* v152: 朝向修正。rb2d.rotation 只影响物理体；地图图标(mapIcon)与子物体读的是
+     * transform.eulerAngles，所以远端火箭"永远朝上"、地图图标也跟着朝上。
+     * 这里把同一个角度同时写进 transform.eulerAngles.z。 */
+    { void* tr = (g_mGetTransform && ro) ? g_ri(g_mGetTransform, ro, NULL, &e) : NULL;
+      if(tr){
+          if(!g_mSetEuler){
+              void* tcls = g_mObjGetClass ? g_mObjGetClass(tr) : NULL;
+              if(tcls && g_gm) g_mSetEuler = g_gm(tcls, "set_eulerAngles", 1);
+          }
+          if(g_mSetEuler){ float eu[3]; eu[0]=0.0f; eu[1]=0.0f; eu[2]=irot;
+              void* a3[1]; a3[0]=eu; void* e3=NULL; g_ri(g_mSetEuler, tr, a3, &e3);
+              if(!g_rotLogged){ g_rotLogged=1; char b6[210];
+                  snprintf(b6,sizeof(b6),"v152: rot in=%.2f setEuler z=%.2f exc=%p\n", irot, eu[2], e3); log_app(b6); } }
+      } }
     if(g_rrSyncN < 3){ g_rrSyncN++; char b[220];
-        snprintf(b,sizeof(b),"v78: sync[%d] gid=%d raw=(%.2f,%.2f) interp=(%.2f,%.2f) rot=%.1f snaps=%d\n",
-                 i, rr->gid, rr->x, rr->y, ix, iy, irot, rr->nsnap); log_app(b); }
+        snprintf(b,sizeof(b),"v154: sync[%d] gid=%d raw=(%.2f,%.2f) interp=(%.2f,%.2f) rot=%.1f snaps=%d pursue=%d\n",
+                 i, rr->gid, rr->x, rr->y, ix, iy, irot, g_snapN, g_pursueN); log_app(b); }
 }
 
 /* v110: 运行时开关 —— 每 120 帧看一次 sfsmp-rr.txt，内容首字符 '0' 就关掉远端渲染。
@@ -3156,7 +3261,7 @@ static void pin_view_to_launchpad(void){
 static void hook_update(void* self){
     int f = __sync_add_and_fetch(&g_frame, 1);
     if (g_ready && g_do_clone){ g_do_clone = 0; if (read_mode() == 5) native_window_test(); else if (read_mode() == 6) native_mods_open(); else if (read_mode() == 9) noj_open(1); else if (read_mode() == 11) native_text_input();  else mainmenu_button(); }
-    if (g_ready && !g_cloneGo && (f % 90) == 0) {
+    if (g_ready && !g_cloneGo && (f % 3) == 0) {   /* v149: 90 帧(1.5s) 太慢，菜单出来后才补按钮 */
         if (g_mmInst == NULL && g_mmCls && g_mmMainField && g_staticGet) { void* v = NULL; g_staticGet(g_mmMainField, &v); g_mmInst = v; }
         int _rm = read_mode(); if (g_mmInst && (_rm == 3 || _rm == 9 || _rm == 10 || _rm == 11 || _rm == 12 || _rm == 20)) { log_app("v41: auto-summon (main menu ready)\n"); mainmenu_button(); }
     }
@@ -3168,7 +3273,7 @@ static void hook_update(void* self){
             char ab[120]; snprintf(ab,sizeof(ab),"v48: menuGO active=%d exc=%p\n", val, e5); log_app(ab); }
     }
     if ((f % 300) == 0) { char hb[160]; snprintf(hb,sizeof(hb),"v44: hb f=%d mmInst=%p mmField=%p sg=%p mode=%d\n", f, g_mmInst, g_mmMainField, (void*)g_staticGet, read_mode()); log_app(hb); }
-    if (g_ready && (f % 30) == 0) scene_poll();
+    if (g_ready && (f % 3) == 0) scene_poll();
     if (g_ready && (f % 15) == 0 && !g_autoStarted && f > 480 && g_srcBtn && g_mEvtInvoke
         && read_mode() != 20 && strstr(g_sceneName, "Home_Mobile")) {
         void* ev = *(void**)((char*)g_srcBtn + 0x68);
@@ -3184,7 +3289,7 @@ static void hook_update(void* self){
                 const char* ep = g_tiVal[0][0] ? g_tiVal[0] : "192.168.1.5:9806";
                 char cb[128]; snprintf(cb,sizeof(cb),"v55: dialog closed -> connect '%s'\n", ep); log_app(cb);
                 if (read_mode() == 20) { log_app("v64: dialog closed -> join + enter world (mode 20)\n"); connect_and_enter_world(); }
-                else mp_net_connect(ep);
+                else { ux_connect_started(); mp_net_connect(ep); }
             }
             g_dialogOpen = open;
             if (open != g_tiWasOpen) { char db[120]; snprintf(db,sizeof(db),"v64: dialog open=%d (was %d)\n", open, g_tiWasOpen); log_app(db); }
@@ -3200,6 +3305,7 @@ static void hook_update(void* self){
         g_dumpDone = 1; dump_rockets();
     }
     if (g_ready && (f % 30) == 0 && strstr(g_sceneName, "World_Mobile") && g_rockCls) publish_local_pose();
+    if ((f % 15) == 0) ux_poll_conn();
     /* ---- v97: 刚进世界时把服务器快照的「世界时间」推给游戏 -------------------
      * 对应你的要求「服务器下发的那包当模板」：WorldSnapshot 里有 world_time / difficulty，
      * 火箭内容走各自 CreateRocket（一直在收）。这里只补世界时间，让两边时钟对齐。 */
@@ -3581,7 +3687,8 @@ JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeInit(JNIEnv* env, jcla
                 jstring js = (jstring)(*env)->CallObjectMethod(env, act, gp);
                 if (js) {
                     const char* cs = (*env)->GetStringUTFChars(env, js, NULL);
-                    if (cs) { sfsmp_set_package(cs); (*env)->ReleaseStringUTFChars(env, js, cs); }
+                    if (cs) { sfsmp_set_package(cs); (*env)->ReleaseStringUTFChars(env, js, cs);
+                              /* BISECT3: 去掉 mkdir（怀疑在 onCreate 里做 FUSE 操作会卡住 Unity 启动） */ }
                     (*env)->DeleteLocalRef(env, js);
                 }
             }
@@ -3590,17 +3697,51 @@ JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeInit(JNIEnv* env, jcla
         g_activity = (*env)->NewGlobalRef(env, act);
     }
     if (cls) g_bridge = (jclass)(*env)->NewGlobalRef(env, cls);
-    install_overlay(env);
+    /* v139: 千万不要在 Activity.onCreate 里碰 getWindow()/getDecorView() ——
+       这时 UnityPlayer 还没构造，提前把 DecorView 拉出来会让 Unity 建不出 surface（黑屏）。
+       改由 nativeTick（Unity 起来之后）再装。 */
 }
 
 JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeTick(JNIEnv* env, jclass cls){
-    (void)cls;
     g_ticks++;
-    if (g_login_page && !g_stmt_accepted) check_statement_scroll(env);
-    if (!g_installed) install_overlay(env);
-    if (g_ticks == 2) log_app("v29: ticker alive on UI thread\n");
-    if (g_ready && !g_ui_ready){ g_ui_ready = 1; set_label(env, "MP: ready - tap to build button"); }
-    if (g_ready && g_do_clone){ g_do_clone = 0; if (read_mode() == 5) native_window_test(); else if (read_mode() == 6) native_mods_open(); else if (read_mode() == 9) noj_open(1); else if (read_mode() == 11) native_text_input();  else mainmenu_button(); }
+    if (g_ticks == 1) {
+        if (g_dataDir[0]) {
+            mkdir(g_dataDir, 0770);
+            { char sd[224]; snprintf(sd, sizeof(sd), "%s/Saving", g_dataDir); mkdir(sd, 0770); }
+        }
+        if (!g_decor && g_activity) {          /* v144: Unity 起来后再取 decor 作为 postDelayed 的宿主 */
+            jclass cAct = (*env)->GetObjectClass(env, g_activity);
+            jmethodID mWin = cAct ? (*env)->GetMethodID(env, cAct, "getWindow", "()Landroid/view/Window;") : NULL;
+            jobject win = mWin ? (*env)->CallObjectMethod(env, g_activity, mWin) : NULL;
+            if (win) {
+                jclass cWin = (*env)->GetObjectClass(env, win);
+                jmethodID mDec = cWin ? (*env)->GetMethodID(env, cWin, "getDecorView", "()Landroid/view/View;") : NULL;
+                jobject dec = mDec ? (*env)->CallObjectMethod(env, win, mDec) : NULL;
+                if (dec) g_decor = (*env)->NewGlobalRef(env, dec);
+                (*env)->DeleteLocalRef(env, win);
+            }
+        }
+        /* v147: ticker 只在第一次 tick 跑一次，必须有 Runnable + postDelayed 才能续命。
+           g_mPostDelayed 原来只在 overlay 里解析，overlay 不装就永远是 NULL -> ticker 只跑一次。 */
+        if (!g_ticker) {
+            jclass cTick = (*env)->FindClass(env, "com/sfsmp/bridge/Ticker");
+            if (cTick) {
+                jmethodID c0 = (*env)->GetMethodID(env, cTick, "<init>", "()V");
+                if (c0) { jobject t = (*env)->NewObject(env, cTick, c0);
+                          if (t) g_ticker = (*env)->NewGlobalRef(env, t); }
+                (*env)->DeleteLocalRef(env, cTick);
+            }
+            drain(env, "v147: ticker create");
+        }
+        if (!g_mPostDelayed && g_decor) {
+            jclass cV = (*env)->GetObjectClass(env, g_decor);
+            if (cV) g_mPostDelayed = (*env)->GetMethodID(env, cV, "postDelayed", "(Ljava/lang/Runnable;J)Z");
+            drain(env, "v147: postDelayed lookup");
+        }
+        log_app("v144: dirs+decor ready\n");
+    }
+    if (g_ticks == 3) log_app("v144: ticker alive\n");
+    (void)cls;
     schedule(env, 1000);
 }
 
@@ -3623,9 +3764,37 @@ JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeOnClick(JNIEnv* env, j
     set_label(env, "MP: cloning the game button...");
 }
 
+static sigjmp_buf g_jb;
+static pthread_t g_probe_thr;
+static void segv_probe(int sig){
+    /* v136: 这是进程级 handler。只有探针线程自己的 fault 才能 longjmp，
+       别的线程（尤其 Unity 主线程）的 fault 必须还原默认处理，否则会跨线程跳栈，
+       把 Unity 的主线程搅死（实测表现为永久黑屏、il2cpp 永不初始化）。 */
+    if (!g_probe_thr || !pthread_equal(pthread_self(), g_probe_thr)) {
+        signal(sig, SIG_DFL); raise(sig); return;
+    }
+    siglongjmp(g_jb, 1);
+}
+
 static void* worker(void* arg){
+    /* v137 诊断：完全不动 il2cpp，验证「游戏本身能否正常启动」。
+       Unity 起不来的黑屏如果在这一版消失，就证明是我们早期进 il2cpp 把初始化搅死了。 */
+    log_app("v144: worker start\n");
     (void)arg;
-    sleep(8);
+    { int w = 0; while (g_ticks < 1 && w < 120) { usleep(500000); w++; }
+      if (g_ticks < 1) { log_app("v147: no ticker, abort\n"); return NULL; } }
+    /* v145: ticker 在 onCreate 就跑起来了（1 秒一次），但 il2cpp 要等主菜单才好（实测 10–20 s）。
+       光等 tick 不够 —— 必须真等够时间，否则 dg() 在 libil2cpp 内部 SIGSEGV（worker+840）。 */
+    log_app("v146: waiting for unity (30s)\n");
+    /* v150: 等待时长改为可调（sfsmp-wait.txt，秒），用来摸清「最早多久能安全进 il2cpp」。
+       目标：比主菜单出现更早就绪，这样克隆能跟菜单同一帧完成，用户看不到「先菜单后按钮」。 */
+    { int secs = 2; const char* wp = sfsmp_dp("sfsmp-wait.txt");
+      int fd = wp ? open(wp, O_RDONLY) : -1;
+      if (fd >= 0) { char wb[16] = {0}; int n = (int)read(fd, wb, 15); close(fd);
+                     if (n > 0) { int v = atoi(wb); if (v >= 1 && v <= 60) secs = v; } }
+      { char wl[80]; snprintf(wl, sizeof(wl), "v150: wait=%ds\n", secs); log_app(wl); }
+      sleep(secs); }
+    log_app("v146: entering il2cpp\n");
     void* h = dlopen("libil2cpp.so", RTLD_NOW);
     if (!h) { log_app("v29: no il2cpp\n"); return NULL; }
     fn0 dg=(fn0)dlsym(h,"il2cpp_domain_get");
@@ -3647,9 +3816,15 @@ static void* worker(void* arg){
     fn_mp mp=(fn_mp)dlsym(dlopen("libc.so",RTLD_NOW),"mprotect");
     if(!dg||!ta||!ao||!gi||!cf||!gm||!cgfn||!fgt||!tgoc||!tgo||!cgt||!fgo||!ri||!alg||!unbox||!schars||!mp){ log_app("v29: missing syms\n"); return NULL; }
     g_ri=ri; g_alg=alg; g_unbox=unbox; g_schars=schars;
-    void* d=dg(); ta(d);
-    void* a=ao(d,"Assembly-CSharp"); if(!a){ log_app("v29: no asm\n"); return NULL; }
-    void* img=gi(a); if(!img){ log_app("v29: no img\n"); return NULL; }
+    /* v138: 一次到位，不做探针（探针会在 il2cpp 持锁时 longjmp，把 Unity 初始化线程锁死） */
+    void* d = dg();
+    { char db[110]; snprintf(db, sizeof(db), "v138: domain=%p\n", d); log_app(db); }
+    if (!d) { log_app("v138: no domain\n"); return NULL; }
+    ta(d);
+    void* a = ao(d, "Assembly-CSharp");
+    if (!a) { log_app("v138: no asm\n"); return NULL; }
+    void* img = gi(a);
+    if (!img) { log_app("v138: no img\n"); return NULL; }
     void* coreA=ao(d,"UnityEngine.CoreModule"); if(!coreA){ log_app("v29: no core\n"); return NULL; }
     void* coreImg=gi(coreA);
     char b[260];
@@ -3772,7 +3947,18 @@ static void* worker(void* arg){
         void* goCls2 = cf(coreImg,"UnityEngine","GameObject");
         void* behCls = cf(coreImg,"UnityEngine","Behaviour");
         if(goCls2){ g_mGoTransform=gm(goCls2,"get_transform",0); }
-        if(g_rectCls){ g_mGetSizeDelta=gm(g_rectCls,"get_sizeDelta",0); g_mSetSizeDelta=gm(g_rectCls,"set_sizeDelta",1); g_mGetRect=gm(g_rectCls,"get_rect",0); }
+        if(g_rectCls){ g_mGetSizeDelta=gm(g_rectCls,"get_sizeDelta",0); g_mSetSizeDelta=gm(g_rectCls,"set_sizeDelta",1); g_mGetRect=gm(g_rectCls,"get_rect",0);
+            g_mAnchorMinGet=gm(g_rectCls,"get_anchorMin",0); g_mAnchorMinSet=gm(g_rectCls,"set_anchorMin",1);
+            g_mAnchorMaxGet=gm(g_rectCls,"get_anchorMax",0); g_mAnchorMaxSet=gm(g_rectCls,"set_anchorMax",1);
+            g_mPivotGet=gm(g_rectCls,"get_pivot",0);         g_mPivotSet=gm(g_rectCls,"set_pivot",1); }
+        /* v132: LayoutElement（布局组真正读取的首选尺寸） */
+        g_leCls = cf(coreImg,"UnityEngine.UI","LayoutElement");
+        if(!g_leCls) g_leCls = cf(coreImg,"UnityEngine","LayoutElement");
+        if(g_leCls){
+            g_typeLE=tgo(cgt(g_leCls));
+            g_mLeGetPrefW=gm(g_leCls,"get_preferredWidth",0);  g_mLeSetPrefW=gm(g_leCls,"set_preferredWidth",1);
+            g_mLeGetPrefH=gm(g_leCls,"get_preferredHeight",0); g_mLeSetPrefH=gm(g_leCls,"set_preferredHeight",1);
+        }
         if(trCls){ g_mGetLocalScale=gm(trCls,"get_localScale",0); g_mSetLocalScale=gm(trCls,"set_localScale",1); }
         if(behCls) g_mSetEnabled=gm(behCls,"set_enabled",1);
         if(trCls)  g_mGetSiblingIndex=gm(trCls,"GetSiblingIndex",0);
@@ -3798,6 +3984,9 @@ static void* worker(void* arg){
         g_gm=(void*(*)(void*,const char*,int))gm;
         { void* trc2 = cf(coreImg,"UnityEngine","Transform"); if(trc2){ g_trType2 = tgo(cgt(trc2)); }
           g_goCls2 = cf(coreImg,"UnityEngine","GameObject");
+        if(g_goCls2){ g_mAddComponent = g_gm ? g_gm(g_goCls2,"AddComponent",1) : gm(g_goCls2,"AddComponent",1); }
+        { char lb[240]; snprintf(lb,sizeof(lb),"v132: anchors=%p/%p pivot=%p LE cls=%p type=%p prefW=%p addComp=%p\n",
+                  (void*)g_mAnchorMinGet,(void*)g_mAnchorMinSet,(void*)g_mPivotGet,g_leCls,g_typeLE,(void*)g_mLeGetPrefW,(void*)g_mAddComponent); log_app(lb); }
           { { void* smc = cf(coreImg,"UnityEngine.SceneManagement","SceneManager");
               void* scc = cf(coreImg,"UnityEngine.SceneManagement","Scene");
               if(smc) g_mGetActiveScene = gm(smc,"GetActiveScene",0);

@@ -1,0 +1,420 @@
+{
+ "path": "D:/SFS-Multiplayer/android/work/native/libpatch.so",
+ "class": 64,
+ "machine": "EM_AARCH64",
+ "type": "ET_DYN",
+ "entry": "0x0",
+ "sections": [
+  {
+   "name": ".note.android.ident",
+   "addr": "0x238",
+   "off": "0x238",
+   "size": "0x98",
+   "flags": 2,
+   "type": "SHT_NOTE"
+  },
+  {
+   "name": ".note.gnu.build-id",
+   "addr": "0x2d0",
+   "off": "0x2d0",
+   "size": "0x24",
+   "flags": 2,
+   "type": "SHT_NOTE"
+  },
+  {
+   "name": ".dynsym",
+   "addr": "0x2f8",
+   "off": "0x2f8",
+   "size": "0x2610",
+   "flags": 2,
+   "type": "SHT_DYNSYM"
+  },
+  {
+   "name": ".gnu.version",
+   "addr": "0x2908",
+   "off": "0x2908",
+   "size": "0x32c",
+   "flags": 2,
+   "type": "SHT_GNU_versym"
+  },
+  {
+   "name": ".gnu.version_d",
+   "addr": "0x2c34",
+   "off": "0x2c34",
+   "size": "0x38",
+   "flags": 2,
+   "type": "SHT_GNU_verdef"
+  },
+  {
+   "name": ".gnu.version_r",
+   "addr": "0x2c6c",
+   "off": "0x2c6c",
+   "size": "0x60",
+   "flags": 2,
+   "type": "SHT_GNU_verneed"
+  },
+  {
+   "name": ".gnu.hash",
+   "addr": "0x2cd0",
+   "off": "0x2cd0",
+   "size": "0x578",
+   "flags": 2,
+   "type": "SHT_GNU_HASH"
+  },
+  {
+   "name": ".hash",
+   "addr": "0x3248",
+   "off": "0x3248",
+   "size": "0xcb8",
+   "flags": 2,
+   "type": "SHT_HASH"
+  },
+  {
+   "name": ".dynstr",
+   "addr": "0x3f00",
+   "off": "0x3f00",
+   "size": "0x2f5e",
+   "flags": 2,
+   "type": "SHT_STRTAB"
+  },
+  {
+   "name": ".rela.dyn",
+   "addr": "0x6e60",
+   "off": "0x6e60",
+   "size": "0xd518",
+   "flags": 2,
+   "type": "SHT_RELA"
+  },
+  {
+   "name": ".rela.plt",
+   "addr": "0x14378",
+   "off": "0x14378",
+   "size": "0x1620",
+   "flags": 66,
+   "type": "SHT_RELA"
+  },
+  {
+   "name": ".rodata",
+   "addr": "0x159a0",
+   "off": "0x159a0",
+   "size": "0x7fed4",
+   "flags": 50,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".gcc_except_table",
+   "addr": "0x95874",
+   "off": "0x95874",
+   "size": "0x1d50",
+   "flags": 2,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".eh_frame_hdr",
+   "addr": "0x975c4",
+   "off": "0x975c4",
+   "size": "0x386c",
+   "flags": 2,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".eh_frame",
+   "addr": "0x9ae30",
+   "off": "0x9ae30",
+   "size": "0x1193c",
+   "flags": 2,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".text",
+   "addr": "0xac770",
+   "off": "0xac770",
+   "size": "0x120d38",
+   "flags": 6,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".plt",
+   "addr": "0x1cd4b0",
+   "off": "0x1cd4b0",
+   "size": "0xee0",
+   "flags": 6,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".data.rel.ro",
+   "addr": "0x1cf390",
+   "off": "0x1ce390",
+   "size": "0x57a8",
+   "flags": 3,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".fini_array",
+   "addr": "0x1d4b38",
+   "off": "0x1d3b38",
+   "size": "0x10",
+   "flags": 3,
+   "type": "SHT_FINI_ARRAY"
+  },
+  {
+   "name": ".init_array",
+   "addr": "0x1d4b48",
+   "off": "0x1d3b48",
+   "size": "0x28",
+   "flags": 3,
+   "type": "SHT_INIT_ARRAY"
+  },
+  {
+   "name": ".dynamic",
+   "addr": "0x1d4b70",
+   "off": "0x1d3b70",
+   "size": "0x220",
+   "flags": 3,
+   "type": "SHT_DYNAMIC"
+  },
+  {
+   "name": ".got",
+   "addr": "0x1d4d90",
+   "off": "0x1d3d90",
+   "size": "0x130",
+   "flags": 3,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".got.plt",
+   "addr": "0x1d4ec0",
+   "off": "0x1d3ec0",
+   "size": "0x778",
+   "flags": 3,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".relro_padding",
+   "addr": "0x1d5638",
+   "off": "0x1d4638",
+   "size": "0x9c8",
+   "flags": 3,
+   "type": "SHT_NOBITS"
+  },
+  {
+   "name": ".data",
+   "addr": "0x1d6638",
+   "off": "0x1d4638",
+   "size": "0x640",
+   "flags": 3,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".bss",
+   "addr": "0x1d6c80",
+   "off": "0x1d4c78",
+   "size": "0x108c788",
+   "flags": 3,
+   "type": "SHT_NOBITS"
+  },
+  {
+   "name": ".comment",
+   "addr": "0x0",
+   "off": "0x1d4c78",
+   "size": "0xcc",
+   "flags": 48,
+   "type": "SHT_PROGBITS"
+  },
+  {
+   "name": ".shstrtab",
+   "addr": "0x0",
+   "off": "0x1d4d44",
+   "size": "0x12d",
+   "flags": 0,
+   "type": "SHT_STRTAB"
+  }
+ ],
+ "needed": [
+  "libdl.so",
+  "liblog.so",
+  "libandroid.so",
+  "libGLESv2.so",
+  "libEGL.so",
+  "libc.so",
+  "libm.so"
+ ],
+ "soname": "libpatch.so",
+ "init_array": "0x1d4b48"
+}
+SYMCOUNT 175
+0xac7c0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array3NewEP11Il2CppClassm
+0xac7dc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils6Memory6MallocEm
+0xac7f8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm7Runtime23GetMissingMethodInvokerEv
+0xac814 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm13InternalCalls3AddEPKcPFvvE
+0xac830 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array22GetFirstElementAddressEP11Il2CppArray
+0xac84c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array13GetByteLengthEP11Il2CppArray
+0xac868 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception27RaiseNullReferenceExceptionEv
+0xac884 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class14FromIl2CppTypeEPK10Il2CppTypeb
+0xac8a0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception20GetArgumentExceptionEPKcS3_
+0xac8bc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception5RaiseEP15Il2CppExceptionP10MethodInfo
+0xac8d8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils6Memory4FreeEPv
+0xac8f4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils6Memory6CallocEmm
+0xac910 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Image13ClassFromNameEPK11Il2CppImagePKcS6_
+0xac92c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm7Runtime9ClassInitEP11Il2CppClass
+0xac948 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception24GetNotSupportedExceptionEPKc
+0xac964 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception27GetExecutionEngineExceptionEPKc
+0xac980 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14MetadataMallocEm
+0xac99c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils6Memory11AlignedFreeEPv
+0xac9b8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm13MetadataCache14GetGenericInstEPKPK10Il2CppTypej
+0xac9d4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata15GenericMetadata15GetGenericClassEPK10Il2CppTypePK17Il2CppGenericInst
+0xac9f0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata28GetGenericParameterFromIndexEPK39___Il2CppMetadataGenericContainerHandlei
+0xaca0c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception20GetTypeLoadExceptionEPKc
+0xaca28 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata14GetNestedTypesEPK27___Il2CppMetadataTypeHandlePPv
+0xaca44 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System4Type20internal_from_handleEl
+0xaca60 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System11RuntimeType11getFullNameEP27Il2CppReflectionRuntimeTypebb
+0xaca7c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils11StringUtils11Utf16ToUtf8EPKDsi
+0xaca98 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm8Assembly8GetImageEPK14Il2CppAssembly
+0xacab4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class8FromNameEPK11Il2CppImagePKcS6_
+0xacad0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception20GetTypeLoadExceptionERKNS_5utils10StringViewIcEES6_S6_
+0xacaec 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata22GetTypeHandleFromIndexEi
+0xacb08 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata22GetIl2CppTypeFromIndexEi
+0xacb24 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils6Memory14AlignedReallocEPvmm
+0xacb40 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils6Memory13AlignedMallocEmm
+0xacb5c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm8Assembly16GetAllAssembliesEv
+0xacb78 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class4InitEP11Il2CppClass
+0xacb94 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class16GetVirtualMethodEP11Il2CppClassPK10MethodInfo
+0xacbb0 0 STB_GLOBAL STT_FUNC 16 _ZN14il2cpp_baselib33Baselib_Thread_GetCurrentThreadIdEv
+0xacbcc 0 STB_GLOBAL STT_FUNC 16 _ZN14il2cpp_baselib24Baselib_SystemFutex_WaitEPiij
+0xacbe8 0 STB_GLOBAL STT_FUNC 16 _ZN14il2cpp_baselib26Baselib_SystemFutex_NotifyEPijNS_30Baselib_WakeupFallbackStrategyE
+0xacc04 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2gc16GarbageCollector13AllocateFixedEmPv
+0xacc20 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2gc16GarbageCollector21CallWithAllocLockHeldEPFPvS2_ES2_
+0xacc3c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2gc16GarbageCollector9FreeFixedEPv
+0xacc58 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata15GenericMetadata15InflateIfNeededEPK10Il2CppTypePK20Il2CppGenericContextb
+0xacc74 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class9GetFieldsEP11Il2CppClassPPv
+0xacc90 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception25GetMissingMethodExceptionEPKc
+0xaccac 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class12SetupMethodsEP11Il2CppClass
+0xaccc8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata15GenericMetadata7InflateEPK10MethodInfoPK20Il2CppGenericContext
+0xacce4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6String8NewUtf16EPKDsi
+0xacd00 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6String5EmptyEv
+0xacd1c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata26Il2CppTypeEqualityComparer8AreEqualEPK10Il2CppTypeS4_
+0xacd38 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp5utils11StringUtils11Utf16ToUtf8EPKDs
+0xacd54 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System17RuntimeTypeHandle18internal_from_nameEP12Il2CppStringPiP12Il2CppObjectbbb
+0xacd70 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6String6NewLenEPKcj
+0xacd8c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata21GetTypeInfoFromHandleEPK27___Il2CppMetadataTypeHandle
+0xacda8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class16GetFieldFromNameEP11Il2CppClassPKc
+0xacdc4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class19GetPropertyFromNameEP11Il2CppClassPKc
+0xacde0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm8Assembly17GetLoadedAssemblyEPKc
+0xacdfc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception23GetDllNotFoundExceptionEPKc
+0xace18 0 STB_GLOBAL STT_FUNC 16 _ZN9hybridclr8metadata11VTableSetUp11BuildByTypeER13Il2CppHashMapIPK10Il2CppTypePS1_N6il2cpp8metadata14Il2CppTypeHashENS8_26Il2CppTypeEqualityComparerEN6google27libc_allocator_with_reallocINSt6__ndk14pairIK10KeyWrapperIS5_ES6_EEEEES5_
+0xace34 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14MetadataCallocEmm
+0xace50 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata29GetMethodInfoFromMethodHandleEPK29___Il2CppMetadataMethodHandle
+0xace6c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Object3BoxEP11Il2CppClassPv
+0xace88 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class15GetElementClassEP11Il2CppClass
+0xacea4 0 STB_GLOBAL STT_FUNC 16 _ZNK6il2cpp8metadata14Il2CppTypeHashclEPK10Il2CppType
+0xacec0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm13MetadataCache21GetAssemblyTypeHandleEPK11Il2CppImagei
+0xacedc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class11SetupFieldsEP11Il2CppClass
+0xacef8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Field14IsNormalStaticEP9FieldInfo
+0xacf14 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Field14IsThreadStaticEP9FieldInfo
+0xacf30 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata15GenericMetadata25ContainsGenericParametersEPK10Il2CppType
+0xacf4c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata16StructLayoutPackEPK27___Il2CppMetadataTypeHandle
+0xacf68 0 STB_GLOBAL STT_FUNC 16 _Z33il2cpp_codegen_runtime_class_initP11Il2CppClass
+0xacf84 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception22RaiseOverflowExceptionEv
+0xacfa0 0 STB_GLOBAL STT_FUNC 16 _Z34il2cpp_codegen_delegate_end_invokeP17Il2CppAsyncResultPPv
+0xacfbc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Thread19GetThreadStaticDataEi
+0xacfd8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception27GetIndexOutOfRangeExceptionEv
+0xacff4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array14GetElementSizeEPK11Il2CppClass
+0xad010 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System9Threading11Interlocked15CompareExchangeEPiii
+0xad02c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Object3NewEP11Il2CppClass
+0xad048 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6String7NewSizeEi
+0xad064 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System9Threading11Interlocked17CompareExchange_TEPPvS5_S5_
+0xad080 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System9Threading11Interlocked8ExchangeEPii
+0xad09c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm10Reflection17GetAssemblyObjectEPK14Il2CppAssembly
+0xad0b8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm10Reflection15GetMethodObjectEPK10MethodInfoP11Il2CppClass
+0xad0d4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class16IsAssignableFromEP11Il2CppClassS3_
+0xad0f0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Object6IsInstEP12Il2CppObjectP11Il2CppClass
+0xad10c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array9GetLengthEP11Il2CppArray
+0xad128 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception24PrepareExceptionForThrowEP15Il2CppExceptionP10MethodInfo
+0xad144 0 STB_GLOBAL STT_FUNC 16 _Z45il2cpp_codegen_raise_null_reference_exceptionv
+0xad160 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System9Threading11Interlocked15ExchangePointerEPPvS5_
+0xad17c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System9Threading11Interlocked10Exchange64EPll
+0xad198 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp6icalls8mscorlib6System9Threading11Interlocked17CompareExchange64EPlll
+0xad1b4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array11NewSpecificEP11Il2CppClassm
+0xad1d0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class12GetValueSizeEP11Il2CppClassPj
+0xad1ec 0 STB_GLOBAL STT_FUNC 16 _Z14Unbox_internalP12Il2CppObject
+0xad208 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm12ClassInlines40GetInterfaceInvokeDataFromVTableSlowPathEP12Il2CppObjectPK11Il2CppClasst
+0xad224 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Array7NewFullEP11Il2CppClassPmS4_
+0xad240 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata13GenericMethod23GetGenericVirtualMethodEPK10MethodInfoS4_
+0xad25c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception26RaiseDivideByZeroExceptionEv
+0xad278 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception32RaiseArgumentOutOfRangeExceptionEPKc
+0xad294 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception23GetInvalidCastExceptionEPKc
+0xad2b0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception30GetArgumentOutOfRangeExceptionEPKc
+0xad2cc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception29GetArrayTypeMismatchExceptionEv
+0xad2e8 0 STB_GLOBAL STT_FUNC 16 _Z25RaiseInvalidCastExceptionP12Il2CppObjectP11Il2CppClass
+0xad304 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm12ClassInlines19InitFromCodegenSlowEP11Il2CppClass
+0xad320 0 STB_GLOBAL STT_FUNC 16 _Z36il2cpp_codegen_delegate_begin_invokeP14Il2CppDelegatePPvS0_P12Il2CppObject
+0xad33c 0 STB_GLOBAL STT_FUNC 16 _Z22UnBoxNullable_internalP12Il2CppObjectP11Il2CppClassPv
+0xad358 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception28GetInvalidOperationExceptionEPKc
+0xad374 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm9Exception18GetSystemExceptionEv
+0xad390 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata34GetTypeInfoFromTypeDefinitionIndexEi
+0xad3ac 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Method8GetClassEPK10MethodInfo
+0xad3c8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Method23GetNameWithGenericTypesEPK10MethodInfo
+0xad3e4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm6Method11GetFullNameEPK10MethodInfo
+0xad400 0 STB_GLOBAL STT_FUNC 16 _Z36il2cpp_codegen_profiler_method_enterPK10MethodInfo
+0xad41c 0 STB_GLOBAL STT_FUNC 16 _Z35il2cpp_codegen_profiler_method_exitPK10MethodInfo
+0xad438 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp8metadata15GenericMetadata25ContainsGenericParametersEPK17Il2CppGenericInst
+0xad454 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata35GetGenericContainerFromGenericClassEPK18Il2CppGenericClass
+0xad470 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class10GetMethodsEP11Il2CppClassPPv
+0xad48c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata21GetTypeHandleFromTypeEPK10Il2CppType
+0xad4a8 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm13MetadataCache34GetThreadLocalStaticOffsetForFieldEP9FieldInfo
+0xad4c4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class13GetArrayClassEP11Il2CppClassj
+0xad4e0 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm4Type6IsEnumEPK10Il2CppType
+0xad4fc 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm4Type8GetClassEPK10Il2CppType
+0xad518 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class15GetEnumBaseTypeEP11Il2CppClass
+0xad534 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14PlatformInvoke7ResolveERK16PInvokeArguments
+0xad550 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Field7GetDataEP9FieldInfo
+0xad56c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm5Class17GetMethodFromNameEP11Il2CppClassPKci
+0xad588 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm13MetadataCache27RegisterInterpreterAssemblyEP14Il2CppAssembly
+0xad58c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata18GetStringFromIndexEi
+0xad594 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata24ConvertPackingSizeToEnumEh
+0xad59c 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata28GetMethodIndexFromDefinitionEPK22Il2CppMethodDefinition
+0xad5a4 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata25GetIndexForTypeDefinitionEPK11Il2CppClass
+0xad5ac 0 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2vm14GlobalMetadata18FromTypeDefinitionEj
+0xad5b4 3640 STB_GLOBAL STT_FUNC 16 stubs_resolve
+0xae3ec 0 STB_GLOBAL STT_FUNC 16 engine_script_resolve_fwd
+0xae480 44 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLockC1Ev
+0xae480 44 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLockC2Ev
+0xae4ac 44 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLockD1Ev
+0xae4ac 44 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLockD2Ev
+0xae4e8 8 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLock10LockSharedEv
+0xae4f0 8 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLock13LockExclusiveEv
+0xae4f8 8 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLock13ReleaseSharedEv
+0xae500 8 STB_GLOBAL STT_FUNC 16 _ZN6il2cpp2os26FastReaderReaderWriterLock16ReleaseExclusiveEv
+0xae508 8 STB_GLOBAL STT_FUNC 16 resolve_GetTypeLoadException_SV3
+0xae510 1120 STB_GLOBAL STT_FUNC 16 install_inline_hook_to
+0xae970 12 STB_GLOBAL STT_FUNC 16 install_inline_hook
+0xae97c 3516 STB_GLOBAL STT_FUNC 16 interceptor_class_from_name
+0xaf938 352 STB_GLOBAL STT_FUNC 16 interceptor_store_dll
+0xafee4 108 STB_GLOBAL STT_FUNC 16 interceptor_set_dll_image
+0xaff50 528 STB_GLOBAL STT_FUNC 16 interceptor_resolve_dll_image
+0xb032c 348 STB_GLOBAL STT_FUNC 16 interceptor_register_dll
+0xb071c 372 STB_GLOBAL STT_FUNC 16 interceptor_trigger_injection
+0xb0890 92 STB_GLOBAL STT_FUNC 16 interceptor_register_managed_class
+0xb08ec 2260 STB_GLOBAL STT_FUNC 16 interceptor_runtime_invoke
+0xb205c 448 STB_GLOBAL STT_FUNC 16 bridge_managed_invoke
+0xb221c 996 STB_GLOBAL STT_FUNC 16 bridge_inject_all_types
+0xb2674 240 STB_GLOBAL STT_FUNC 16 bridge_call_all_entry_points
+0xb32d8 496 STB_GLOBAL STT_FUNC 16 interceptor_domain_assembly_open
+0xb39f4 684 STB_GLOBAL STT_FUNC 16 interceptor_object_new
+0xb764c 240 STB_GLOBAL STT_FUNC 16 hook_register_csharp
+0xb773c 224 STB_GLOBAL STT_FUNC 16 hook_register
+0xb781c 240 STB_GLOBAL STT_FUNC 16 hook_register_prefix
+0xb790c 240 STB_GLOBAL STT_FUNC 16 hook_register_postfix
+0xb7c84 168 STB_GLOBAL STT_FUNC 16 interceptor_array_new_safe
+0xb7d2c 352 STB_GLOBAL STT_FUNC 16 interceptor_read_string
+0xb7e8c 36 STB_GLOBAL STT_FUNC 16 bridge_call_all_onupdate
+0xc85f4 24 STB_GLOBAL STT_FUNC 16 _Z19call_deferred_loadsv
+0x1245dc 160 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_ModUIHelper_nativeSetActivity
+0x12487c 12 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_FpsOverlay_nativeGetFps
+0x124888 12 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_FpsOverlay_nativeGetFrameCount
+0x124894 12 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_FpsOverlay_nativeGetCalls
+0x1248a0 12 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_ModUIHelper_nativeSetHiddenParts
+0x124ff0 12 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_ModUIHelper_nativeSetHiddenParts__Z
+0x1254a8 12 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_FpsOverlay_nativeGetPartCount
+0x1254b4 268 STB_GLOBAL STT_FUNC 16 Java_com_sfsmod_FpsOverlay_nativeHudLog
+0x12747c 212 STB_GLOBAL STT_FUNC 16 JNI_OnLoad

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # SFS patch installer - standalone app build (aapt2 + javac + d8 + uber-apk-signer)
 #
 # 版本号策略（按用户 2026-10-25 澄清）：

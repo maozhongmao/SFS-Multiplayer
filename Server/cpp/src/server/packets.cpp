@@ -879,6 +879,12 @@ void Server::handle_packet(int fd, const std::vector<std::uint8_t>& payload, std
             // P2P 信令：转发给目标玩家
             for (auto& [cfd, c] : conns_) {
                 if (!c.handshaked || c.player_id != pkt.peer_player_id) continue;
+                // 手机端没有 P2P 实现：直接丢弃报价，避免发起方一直等应答（表现为"连不上/卡几秒"）。
+                if (c.platform == 1) {
+                    SFS_LOGI(Cat::Net, "[cpp-server] P2P 报价丢弃：目标 %d 是手机端",
+                             static_cast<int>(c.player_id));
+                    break;
+                }
                 send_packet(cfd, static_cast<std::uint8_t>(PT::kP2PPeerOffer), pkt);
                 break;
             }

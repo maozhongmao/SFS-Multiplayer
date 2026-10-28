@@ -371,3 +371,18 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
   This Source Code Form is "Incompatible With Secondary Licenses", as
   defined by the Mozilla Public License, v. 2.0.
+
+-------------------------------------------------------------------------
+
+附加条款 / Additional Terms（项目补充说明，非 Mozilla 原文）
+
+1. 目录分协议：本仓库 `Android/` 目录（手机端联机补丁：注入层 `libsfsmp.so`、
+   `libmain.so` 跳板、补丁安装器）不适用本 MPL 文本，而是以 GNU General Public
+   License v3.0 or later 发布，完整条款见 `Android/LICENSE`。该目录下每个源码文件
+   头部带 `SPDX-License-Identifier: GPL-3.0-or-later`。
+2. 其余目录（`Client/`、`Server/`、`Plugin/` 等）依 Mozilla Public License 2.0
+   （即本文本）发布，每个源码文件头部带 `SPDX-License-Identifier: MPL-2.0`。
+3. 本仓库不包含、也不分发 Spaceflight Simulator 的游戏本体、游戏资源或反编译代码；
+   手机端补丁只作用于用户自己设备上已经安装的正版游戏。
+4. 第 1 条属于 MPL-2.0 第 3.2 节允许的「附加条款 / 独立文件」安排：它只适用于明确
+   标注 GPL 的那个子目录，不改变本文件其余部分的效力。

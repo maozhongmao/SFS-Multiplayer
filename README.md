@@ -14,7 +14,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - `Client/`：客户端联机模组源码。
 - `Plugin/`：独立联机服务端插件。
 - `Server/`：独立联机服务端源码。
-- `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)。
+- `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)；`Android/LICENSE` 为手机端的 [GPL-3.0 LICENSE](Android/LICENSE)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
 
@@ -70,7 +70,19 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 
 ## 开源协议
 
-本项目使用 MPL License。详细条款请查看 [LICENSE.md](LICENSE.md)。
+本项目**按目录分协议**，两套协议同时生效：
+
+| 范围 | 协议 | 条款 |
+|---|---|---|
+| `Android/`（手机端联机补丁：注入层 `libsfsmp.so`、跳板 `libmain.so`、补丁安装器） | **GPL-3.0-or-later** | [Android/LICENSE](Android/LICENSE) |
+| 其余部分（`Client/`、`Server/`、`Plugin/` 等） | **MPL-2.0** | [LICENSE.md](LICENSE.md) |
+
+- GPL 部分：分发二进制时必须一并提供对应源码；衍生作品同样以 GPL 发布。
+- MPL 部分：修改过的 MPL 文件需以 MPL 公开其源码，可与闭源代码组合。
+
+每个源码文件头部都带 `SPDX-License-Identifier` 标识，可据此判断单个文件适用哪份协议。
+
+> 本仓库不包含 Spaceflight Simulator 的任何游戏源码、资源或游戏本体。手机端补丁是在用户自己的设备上，对已安装的正版游戏打补丁。
 
 ## 源码仓库
 

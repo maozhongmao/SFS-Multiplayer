@@ -1,0 +1,316 @@
+/* ================= v37: login page (Android overlay) ================= */
+static jobject g_login_page = NULL, g_login_back = NULL, g_login_join = NULL;
+static jobject g_login_stmt_title = NULL, g_login_scroll = NULL, g_login_status = NULL;
+static int g_stmt_accepted = 0;
+
+static const char* STMT_TEXT =
+"STCH Studio Multiplayer Mod and Relay Server Statement\n\nUpdated: August 16, 2026\n\n"
+"STCH Studio, independently established and operated by the developer known as maozhongmao / yangchengtong (\"STCH Studio\" or \"the Developer\"), hereby states:\n\n"
+"This multiplayer mod and relay server (the \"Service\") are independently developed by the Developer as a non-official public-interest tool intended to support multiplayer play for the Spaceflight Simulator (SFS) community. Please read and comply with this Statement before use.\n\n"
+"1. Non-Official Status\n\nThe Service is independently developed by STCH Studio. It has no affiliation, authorization, partnership or endorsement relationship with SFS, its official team, or its rights holders.\n\n"
+"2. Legitimate Game Ownership\n\nBefore using the Service, you must have lawfully purchased and own a legitimate copy of SFS. The Service does not provide or bundle any game files.\n\n"
+"3. Free and Non-Commercial Use\n\nThe Service is permanently free. No person or organization may charge fees or conduct commercial activity through the Service.\n\n"
+"4. Technical Scope\n\nThe Service only relays real-time player spacecraft synchronization data. It does not reverse engineer or modify the core game program.\n\n"
+"5. User Responsibility\n\nEach user is solely responsible for all content and interactions created during multiplayer sessions.\n\n"
+"6. Service Availability Disclaimer\n\nThe Service is provided \"as is\". Availability and security are not guaranteed.\n\n"
+"7. Data Collection and Privacy\n\nOnly player game IDs, IP addresses and spacecraft synchronization data are recorded.\n\n"
+"8. Prohibited Conduct\n\nUsers must not distribute malicious code, attack the server, impersonate others, or commit fraud.\n\n"
+"9. Changes and Termination\n\nThe Developer may update, suspend or terminate the Service at any time.\n\n"
+"10. Governing Law and Disputes\n\nDisputes should first be resolved through friendly negotiation.\n\n"
+"11. Support and Feedback\n\nQQ Group 2: 679991439\nEmail: maozhongmao@qq.com / yangchengtong@stch.de5.net\n\n"
+"12. Open-Source Notice\n\nMIT License. Source: https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer\n\n"
+"STCH Studio (Developer: maozhongmao / yangchengtong)\n";
+
+static float g_density = 3.0f;
+static int dpi(int v){ return (int)((float)v * g_density + 0.5f); }
+
+static jobject v37_rounded(JNIEnv* e, jint color, float radius_dp)
+{
+    jclass c = (*e)->FindClass(e, "android/graphics/drawable/GradientDrawable");
+    jobject d;
+    jmethodID ctor, sc, sr;
+    if (!c) return NULL;
+    ctor = (*e)->GetMethodID(e, c, "<init>", "()V");
+    d = (*e)->NewObject(e, c, ctor);
+    if (!d) return NULL;
+    sc = (*e)->GetMethodID(e, c, "setColor", "(I)V");
+    (*e)->CallVoidMethod(e, d, sc, color);
+    sr = (*e)->GetMethodID(e, c, "setCornerRadius", "(F)V");
+    (*e)->CallVoidMethod(e, d, sr, (jfloat)dpi((int)radius_dp));
+    return d;
+}
+
+static jobject v37_text(JNIEnv* e, const char* text, float sp, jint color, int bold)
+{
+    jclass c = (*e)->FindClass(e, "android/widget/TextView");
+    jmethodID ctor = (*e)->GetMethodID(e, c, "<init>", "(Landroid/content/Context;)V");
+    jobject v = (*e)->NewObject(e, c, ctor, g_activity);
+    jmethodID setText, setSize, setColor;
+    jstring js;
+    if (!v) return NULL;
+    setText = (*e)->GetMethodID(e, c, "setText", "(Ljava/lang/CharSequence;)V");
+    js = (*e)->NewStringUTF(e, text ? text : "");
+    (*e)->CallVoidMethod(e, v, setText, js);
+    (*e)->DeleteLocalRef(e, js);
+    setSize = (*e)->GetMethodID(e, c, "setTextSize", "(F)V");
+    (*e)->CallVoidMethod(e, v, setSize, (jfloat)sp);
+    setColor = (*e)->GetMethodID(e, c, "setTextColor", "(I)V");
+    (*e)->CallVoidMethod(e, v, setColor, color);
+    if (bold) {
+        jclass ctf = (*e)->FindClass(e, "android/graphics/Typeface");
+        jfieldID fb = (*e)->GetStaticFieldID(e, ctf, "DEFAULT_BOLD", "Landroid/graphics/Typeface;");
+        jobject tf = (*e)->GetStaticObjectField(e, ctf, fb);
+        jmethodID stf = (*e)->GetMethodID(e, c, "setTypeface", "(Landroid/graphics/Typeface;)V");
+        (*e)->CallVoidMethod(e, v, stf, tf);
+    }
+    return v;
+}
+
+static jobject v37_edit(JNIEnv* e, const char* value, int inputType)
+{
+    jclass c = (*e)->FindClass(e, "android/widget/EditText");
+    jmethodID ctor = (*e)->GetMethodID(e, c, "<init>", "(Landroid/content/Context;)V");
+    jobject v = (*e)->NewObject(e, c, ctor, g_activity);
+    jmethodID setText, setSize, setColor, setType, setSingle, setBg, setPad;
+    jclass cView;
+    jstring js;
+    if (!v) return NULL;
+    setText = (*e)->GetMethodID(e, c, "setText", "(Ljava/lang/CharSequence;)V");
+    js = (*e)->NewStringUTF(e, value ? value : "");
+    (*e)->CallVoidMethod(e, v, setText, js);
+    (*e)->DeleteLocalRef(e, js);
+    setSize = (*e)->GetMethodID(e, c, "setTextSize", "(F)V");
+    (*e)->CallVoidMethod(e, v, setSize, (jfloat)16);
+    setColor = (*e)->GetMethodID(e, c, "setTextColor", "(I)V");
+    (*e)->CallVoidMethod(e, v, setColor, (jint)0xFFFFFFFF);
+    setType = (*e)->GetMethodID(e, c, "setInputType", "(I)V");
+    (*e)->CallVoidMethod(e, v, setType, (jint)inputType);
+    setSingle = (*e)->GetMethodID(e, c, "setSingleLine", "(Z)V");
+    (*e)->CallVoidMethod(e, v, setSingle, (jboolean)1);
+    cView = (*e)->FindClass(e, "android/view/View");
+    setBg = (*e)->GetMethodID(e, cView, "setBackground", "(Landroid/graphics/drawable/Drawable;)V");
+    { jobject bg = v37_rounded(e, (jint)0xFF3A3E42, 8); if (bg) (*e)->CallVoidMethod(e, v, setBg, bg); }
+    setPad = (*e)->GetMethodID(e, cView, "setPadding", "(IIII)V");
+    (*e)->CallVoidMethod(e, v, setPad, dpi(12), dpi(8), dpi(12), dpi(8));
+    return v;
+}
+
+static jobject v37_lin(JNIEnv* e, int orientation)
+{
+    jclass c = (*e)->FindClass(e, "android/widget/LinearLayout");
+    jmethodID ctor = (*e)->GetMethodID(e, c, "<init>", "(Landroid/content/Context;)V");
+    jobject v = (*e)->NewObject(e, c, ctor, g_activity);
+    jmethodID so;
+    if (!v) return NULL;
+    so = (*e)->GetMethodID(e, c, "setOrientation", "(I)V");
+    (*e)->CallVoidMethod(e, v, so, (jint)orientation);
+    return v;
+}
+
+static void v37_bg(JNIEnv* e, jobject v, jint color, float r)
+{
+    jclass cV = (*e)->FindClass(e, "android/view/View");
+    jmethodID sb = (*e)->GetMethodID(e, cV, "setBackground", "(Landroid/graphics/drawable/Drawable;)V");
+    jobject d = v37_rounded(e, color, r);
+    if (d) (*e)->CallVoidMethod(e, v, sb, d);
+}
+
+static void v37_pad(JNIEnv* e, jobject v, int l, int t, int r, int b)
+{
+    jclass cV = (*e)->FindClass(e, "android/view/View");
+    jmethodID sp = (*e)->GetMethodID(e, cV, "setPadding", "(IIII)V");
+    (*e)->CallVoidMethod(e, v, sp, dpi(l), dpi(t), dpi(r), dpi(b));
+}
+
+static void v37_addvw(JNIEnv* e, jobject parent, jobject child, int w, int h, int weight, int marginH, int marginV)
+{
+    jclass cVG = (*e)->FindClass(e, "android/view/ViewGroup");
+    jmethodID mAdd = (*e)->GetMethodID(e, cVG, "addView", "(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V");
+    jclass cLP = (*e)->FindClass(e, "android/widget/LinearLayout$LayoutParams");
+    jmethodID ctorLP = (*e)->GetMethodID(e, cLP, "<init>", "(II)V");
+    jobject lp = (*e)->NewObject(e, cLP, ctorLP, w, h);
+    if (!lp) return;
+    if (weight > 0) { jfieldID fw = (*e)->GetFieldID(e, cLP, "weight", "F"); (*e)->SetFloatField(e, lp, fw, (jfloat)weight); }
+    if (marginH > 0 || marginV > 0) {
+        jclass cMLP = (*e)->FindClass(e, "android/view/ViewGroup$MarginLayoutParams");
+        jmethodID sm = (*e)->GetMethodID(e, cMLP, "setMargins", "(IIII)V");
+        (*e)->CallVoidMethod(e, lp, sm, dpi(marginH), dpi(marginV), dpi(marginH), dpi(marginV));
+    }
+    (*e)->CallVoidMethod(e, parent, mAdd, child, lp);
+}
+
+static jobject v37_button(JNIEnv* e, const char* text, jint bgColor)
+{
+    jobject v = v37_text(e, text, 16, (jint)0xFFFFFFFF, 1);
+    jclass cTV, cView;
+    jmethodID gv, setClickable, mSetClick;
+    jfieldID fInst;
+    jobject listener;
+    if (!v) return NULL;
+    v37_bg(e, v, bgColor, 8);
+    cTV = (*e)->FindClass(e, "android/widget/TextView");
+    gv = (*e)->GetMethodID(e, cTV, "setGravity", "(I)V");
+    (*e)->CallVoidMethod(e, v, gv, 17);
+    cView = (*e)->FindClass(e, "android/view/View");
+    setClickable = (*e)->GetMethodID(e, cView, "setClickable", "(Z)V");
+    (*e)->CallVoidMethod(e, v, setClickable, (jboolean)1);
+    fInst = (*e)->GetStaticFieldID(e, g_bridge, "INSTANCE", "Lcom/sfsmp/bridge/Bridge;");
+    listener = fInst ? (*e)->GetStaticObjectField(e, g_bridge, fInst) : NULL;
+    mSetClick = (*e)->GetMethodID(e, cView, "setOnClickListener", "(Landroid/view/View$OnClickListener;)V");
+    if (listener && mSetClick) (*e)->CallVoidMethod(e, v, mSetClick, listener);
+    return v;
+}
+
+static void check_statement_scroll(JNIEnv* e)
+{
+    jobject sv = g_login_scroll;
+    jclass cSV, cV;
+    jmethodID getY, getChild, getH;
+    jint y, ch, vh;
+    jobject child;
+    if (!sv || g_stmt_accepted) return;
+    cSV = (*e)->GetObjectClass(e, sv);
+    getY = (*e)->GetMethodID(e, cSV, "getScrollY", "()I");
+    getChild = (*e)->GetMethodID(e, cSV, "getChildAt", "(I)Landroid/view/View;");
+    getH = (*e)->GetMethodID(e, cSV, "getHeight", "()I");
+    if (!getY || !getChild || !getH) return;
+    y = (*e)->CallIntMethod(e, sv, getY);
+    child = (*e)->CallObjectMethod(e, sv, getChild, 0);
+    if (!child) return;
+    cV = (*e)->GetObjectClass(e, child);
+    { jmethodID ch2 = (*e)->GetMethodID(e, cV, "getHeight", "()I"); ch = (*e)->CallIntMethod(e, child, ch2); }
+    vh = (*e)->CallIntMethod(e, sv, getH);
+    if (ch - vh - y <= dpi(12)) {
+        g_stmt_accepted = 1;
+        if (g_login_join) {
+            jclass cTV = (*e)->FindClass(e, "android/widget/TextView");
+            jmethodID setText = (*e)->GetMethodID(e, cTV, "setText", "(Ljava/lang/CharSequence;)V");
+            jstring js = (*e)->NewStringUTF(e, "Join Server");
+            (*e)->CallVoidMethod(e, g_login_join, setText, js); (*e)->DeleteLocalRef(e, js);
+        }
+        if (g_login_stmt_title) {
+            jclass cTV = (*e)->FindClass(e, "android/widget/TextView");
+            jmethodID setText = (*e)->GetMethodID(e, cTV, "setText", "(Ljava/lang/CharSequence;)V");
+            jstring js = (*e)->NewStringUTF(e, "User Statement (accepted)");
+            (*e)->CallVoidMethod(e, g_login_stmt_title, setText, js); (*e)->DeleteLocalRef(e, js);
+        }
+        log_app("v37: statement accepted (scrolled to end)\n");
+    }
+}
+
+static void page_hide_login(void)
+{
+    JNIEnv* env = NULL;
+    if (!g_vm || !g_decor || !g_login_page) return;
+    if ((*g_vm)->GetEnv(g_vm, (void**)&env, JNI_VERSION_1_6) != JNI_OK || !env) return;
+    { jclass cVG = (*env)->FindClass(env, "android/view/ViewGroup");
+      jmethodID mRemove = (*env)->GetMethodID(env, cVG, "removeView", "(Landroid/view/View;)V");
+      if (mRemove) (*env)->CallVoidMethod(env, g_decor, mRemove, g_login_page); }
+    (*env)->DeleteGlobalRef(env, g_login_page); g_login_page = NULL;
+    if (g_login_back){ (*env)->DeleteGlobalRef(env, g_login_back); g_login_back = NULL; }
+    if (g_login_join){ (*env)->DeleteGlobalRef(env, g_login_join); g_login_join = NULL; }
+    if (g_login_stmt_title){ (*env)->DeleteGlobalRef(env, g_login_stmt_title); g_login_stmt_title = NULL; }
+    if (g_login_scroll){ (*env)->DeleteGlobalRef(env, g_login_scroll); g_login_scroll = NULL; }
+    if (g_login_status){ (*env)->DeleteGlobalRef(env, g_login_status); g_login_status = NULL; }
+    g_stmt_accepted = 0;
+    drain(env, "v37: login remove");
+    log_app("v37: login page closed\n");
+}
+
+static void page_show_login(void)
+{
+    JNIEnv* e = NULL;
+    jobject page, card, title, stmtBox, stmtTitle, scroll, stmtText, status, btnRow, back, join, row;
+    int i;
+    if (!g_vm || !g_activity || !g_decor) return;
+    if ((*g_vm)->GetEnv(g_vm, (void**)&e, JNI_VERSION_1_6) != JNI_OK || !e) return;
+    if (g_login_page) return;
+
+    { jclass cFrame = (*e)->FindClass(e, "android/widget/FrameLayout");
+      jmethodID ctor = (*e)->GetMethodID(e, cFrame, "<init>", "(Landroid/content/Context;)V");
+      page = (*e)->NewObject(e, cFrame, ctor, g_activity); }
+    if (!page) return;
+    v37_bg(e, page, (jint)0xFF0E1114, 0);
+
+    card = v37_lin(e, 1);
+    v37_bg(e, card, (jint)0xFF2B2E32, 16);
+    v37_pad(e, card, 20, 18, 20, 20);
+
+    title = v37_text(e, "Multiplayer SFS - Join Menu", 20, (jint)0xFFFFFFFF, 1);
+    { jclass cTV = (*e)->FindClass(e, "android/widget/TextView");
+      jmethodID gv = (*e)->GetMethodID(e, cTV, "setGravity", "(I)V");
+      (*e)->CallVoidMethod(e, title, gv, 17); }
+    v37_addvw(e, card, title, -1, -2, 0, 0, 10);
+
+    for (i = 0; i < 3; ++i) {
+        const char* lbl = i == 0 ? "Server" : (i == 1 ? "Username" : "Password");
+        const char* val = i == 0 ? "192.168.1.5" : (i == 1 ? "yangchengtong" : "");
+        int itype = i == 2 ? 0x81 : 1;
+        jobject L, E;
+        row = v37_lin(e, 0);
+        L = v37_text(e, lbl, 17, (jint)0xFFFFFFFF, 1);
+        E = v37_edit(e, val, itype);
+        v37_addvw(e, row, L, dpi(96), -2, 0, 0, 0);
+        v37_addvw(e, row, E, 0, dpi(44), 1, 0, 0);
+        v37_addvw(e, card, row, -1, -2, 0, 0, 7);
+    }
+
+    stmtBox = v37_lin(e, 1);
+    v37_bg(e, stmtBox, (jint)0xFF222529, 12);
+    v37_pad(e, stmtBox, 12, 10, 12, 10);
+    stmtTitle = v37_text(e, "User Statement (read to the end)", 16, (jint)0xFFFFFFFF, 1);
+    { jclass cTV = (*e)->FindClass(e, "android/widget/TextView");
+      jmethodID gv = (*e)->GetMethodID(e, cTV, "setGravity", "(I)V");
+      (*e)->CallVoidMethod(e, stmtTitle, gv, 17); }
+    v37_addvw(e, stmtBox, stmtTitle, -1, -2, 0, 0, 5);
+
+    { jclass cSV = (*e)->FindClass(e, "android/widget/ScrollView");
+      jmethodID ctor = (*e)->GetMethodID(e, cSV, "<init>", "(Landroid/content/Context;)V");
+      scroll = (*e)->NewObject(e, cSV, ctor, g_activity); }
+    stmtText = v37_text(e, STMT_TEXT, 11, (jint)0xFFB9C0C8, 0);
+    { jclass cVG = (*e)->FindClass(e, "android/view/ViewGroup");
+      jmethodID mAdd = (*e)->GetMethodID(e, cVG, "addView", "(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V");
+      jclass cLP = (*e)->FindClass(e, "android/widget/LinearLayout$LayoutParams");
+      jmethodID ctorLP = (*e)->GetMethodID(e, cLP, "<init>", "(II)V");
+      jobject lp = (*e)->NewObject(e, cLP, ctorLP, -1, -2);
+      (*e)->CallVoidMethod(e, scroll, mAdd, stmtText, lp); }
+    v37_addvw(e, stmtBox, scroll, -1, dpi(180), 0, 0, 4);
+    v37_addvw(e, card, stmtBox, -1, -2, 0, 0, 8);
+
+    status = v37_text(e, "Server: unreachable   Client V1.4 (handshake 2)   Ping: --   Players: --", 11, (jint)0xFF9AA4B2, 0);
+    v37_addvw(e, card, status, -1, -2, 0, 0, 7);
+
+    btnRow = v37_lin(e, 0);
+    back = v37_button(e, "Back", (jint)0xFF3A3E42);
+    join = v37_button(e, "Read to the end to continue", (jint)0xFF3A3E42);
+    v37_addvw(e, btnRow, back, 0, dpi(46), 1, 5, 0);
+    v37_addvw(e, btnRow, join, 0, dpi(46), 1, 5, 0);
+    v37_addvw(e, card, btnRow, -1, -2, 0, 0, 8);
+
+    { jclass cVG = (*e)->FindClass(e, "android/view/ViewGroup");
+      jmethodID mAdd = (*e)->GetMethodID(e, cVG, "addView", "(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V");
+      jclass cFLP = (*e)->FindClass(e, "android/widget/FrameLayout$LayoutParams");
+      jmethodID ctorLP = (*e)->GetMethodID(e, cFLP, "<init>", "(II)V");
+      jobject lp = (*e)->NewObject(e, cFLP, ctorLP, -1, -2);
+      jfieldID fg = (*e)->GetFieldID(e, cFLP, "gravity", "I");
+      (*e)->SetIntField(e, lp, fg, 17);
+      jclass cMLP = (*e)->FindClass(e, "android/view/ViewGroup$MarginLayoutParams");
+      jmethodID sm = (*e)->GetMethodID(e, cMLP, "setMargins", "(IIII)V");
+      (*e)->CallVoidMethod(e, lp, sm, dpi(16), dpi(16), dpi(16), dpi(16));
+      (*e)->CallVoidMethod(e, page, mAdd, card, lp); }
+
+    { jclass cFLP = (*e)->FindClass(e, "android/widget/FrameLayout$LayoutParams");
+      jmethodID ctorLP = (*e)->GetMethodID(e, cFLP, "<init>", "(II)V");
+      jclass cVG = (*e)->FindClass(e, "android/view/ViewGroup");
+      jmethodID mAdd = (*e)->GetMethodID(e, cVG, "addView", "(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V");
+      jobject lp = (*e)->NewObject(e, cFLP, ctorLP, -1, -1);
+      (*e)->CallVoidMethod(e, g_decor, mAdd, page, lp); }
+
+    g_login_page = (*e)->NewGlobalRef(e, page);
+    g_login_back = (*e)->NewGlobalRef(e, back);
+    g_login_join = (*e)->NewGlobalRef(e, join);
+    g_login_stmt_title = (*e)->NewGlobalRef(e, stmtTitle);
+    g_login_scroll = (*e)->NewGlobalRef(e, scroll);
+    g_login_status = (*e)->NewGlobalRef(e, status);
+    log_app("v37: *** LOGIN PAGE SHOWN ***\n");
+}

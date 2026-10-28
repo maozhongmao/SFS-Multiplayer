@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
  * mp_net.c — 手机端联机客户端（M1：KCP + 握手）
  *
@@ -95,6 +96,15 @@ static volatile double g_server_world_time = 0.0;
 static volatile int g_have_world_time = 0;
 double mp_server_world_time(void){ return g_have_world_time ? g_server_world_time : 0.0; }
 int mp_is_joined(void){ return g_joined; }
+
+static unsigned long long mp_now_ms(void);
+/* v131: 给上层做「连接状态 HUD」用 —— 最近一次收到服务器包的时间戳 */
+static volatile unsigned long long g_last_rx_ms = 0;
+unsigned long long mp_last_rx_age_ms(void){
+    unsigned long long t = g_last_rx_ms;
+    if(!t) return 0xffffffffull;
+    return mp_now_ms() - t;
+}
 
 void mp_set_local_angular(float av);
 void mp_set_local_pose(double x, double y, double vx, double vy, const char* planet, float rot){
@@ -356,7 +366,10 @@ static int build_frame(unsigned char* out, int cap, int kind, int seq, const uns
 }
 
 static int build_hello(unsigned char* out, int cap, const char* user, const char* pass, const char* solar, int resumeId, const char* resumeTok){
-    int need = 8 + 4+strlen(user) + 4+strlen(pass) + 4+strlen(solar) + 4 + 4+strlen(resumeTok);
+    /* v157: 平台字节改为「有开关文件才发」，默认不发 —— 这样本版能连老的、没有平台字段的服务端。
+     * 打开方式：往 files 目录放一个 sfsmp-platform.txt（内容随意）。 */
+    int pf = (access(sfsmp_dp("sfsmp-platform.txt"), F_OK) == 0) ? 1 : 0;
+    int need = 8 + 4+strlen(user) + 4+strlen(pass) + 4+strlen(solar) + 4 + 4+strlen(resumeTok) + pf;
     if(need > cap) return -1;
     unsigned char* p = out;
     w_u32(p, 0x31465353u); p += 4;
@@ -367,6 +380,7 @@ static int build_hello(unsigned char* out, int cap, const char* user, const char
     v=(unsigned)strlen(solar); w_u32(p,v); p+=4; memcpy(p,solar,v); p+=v;
     w_u32(p,(unsigned)resumeId); p+=4;
     v=(unsigned)strlen(resumeTok); w_u32(p,v); p+=4; memcpy(p,resumeTok,v); p+=v;
+    if(pf) *p++ = 1;   /* platform=1(Android)：服务端据此识别手机端、禁用 P2P、统计人数 */
     return (int)(p - out);
 }
 
@@ -697,6 +711,7 @@ static void* mp_thread(void* arg){
                 if(len + 4 > n) continue;
                 unsigned char* f = kb + 4;
                 int kind = f[4];
+                g_last_rx_ms = mp_now_ms();
                 int payloadBits = (int)r_u32(f+9);
                 int plen = payloadBits / 8;
                 if(!got_ack && kind == 2 /*HelloAck*/){

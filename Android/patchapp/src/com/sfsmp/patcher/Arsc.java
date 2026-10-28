@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 package com.sfsmp.patcher;
 
 import java.nio.charset.StandardCharsets;
