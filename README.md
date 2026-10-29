@@ -10,11 +10,12 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 
 ## 项目组成
 
-- `Android/`：客户端联机补丁源码。
+- `Android/`：客户端联机补丁源码与安装器源码。
 - `Client/`：客户端联机模组源码。
 - `Plugin/`：独立联机服务端插件。
 - `Server/`：独立联机服务端源码。
 - `.gitignore`：垃圾文件。
+- `.gitattributes`：垃圾文件。
 - `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)；手机端的为 [GPL-3.0 LICENSE](Android/LICENSE)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
@@ -32,7 +33,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - KCP 网络传输；需要可靠送达的业务包与高频状态包按类型分流。
 - 服务端权威处理关键多人事件。
 - 太空垃圾自动清理：失去控制且部件数低于阈值的碎片会被自动移除，阈值可在服务端配置。
-- **服务端插件系统（QuickJS）**：服务端可加载预编译的 JS 字节码插件（`SFS_PLUGINS=1` 开启，默认关闭；关闭时产物与未引入前逐字节一致）。插件可读写日志、给指定玩家或全体发消息、读在线玩家名单，并接收世界快照/玩家进出/聊天/控制台命令等事件。
+- 服务端插件系统（QuickJS）：服务端可加载预编译的 JS 字节码插件（`SFS_PLUGINS=1` 开启，默认关闭；关闭时产物与未引入前逐字节一致）。插件可读写日志、给指定玩家或全体发消息、读在线玩家名单，并接收世界快照/玩家进出/聊天/控制台命令等事件。
 
 ## 使用前提
 
