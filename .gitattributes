@@ -1,0 +1,6 @@
+# 只屏蔽历史遗留代码（其余代码照常参与 GitHub 语言统计）
+android/src/v[0-9]*.c linguist-vendored=true
+android/src/v64.c linguist-vendored=false
+android/dump/** linguist-vendored=true
+android/checkpoints/** linguist-vendored=true
+.audit/** linguist-vendored=true
