@@ -16,7 +16,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - `Server/`：独立联机服务端源码。
 - `.gitignore`：垃圾文件。
 - `.gitattributes`：垃圾文件。
-- `LICENCE.md`：本项目的 [MPL LICENSE](LICENSE.md)；手机端的为 [GPL-3.0 LICENSE](Android/LICENSE)。
+- `LICENCE.txt`：本项目的 [MPL LICENSE](LICENSE.txt)；手机端的为 [GPL-3.0 LICENSE](Android/LICENSE.txt)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
 
@@ -77,7 +77,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 | 范围 | 协议 | 条款 |
 |---|---|---|
 | Android/（手机端联机补丁：注入层 libsfsmp.so、跳板 libmain.so、补丁安装器） | **GPL-3.0-or-later** | [Android/LICENSE](Android/LICENSE.txt) |
-| 其余部分（Client/、Server/、Plugin/ 等） | **MPL-2.0** | [LICENSE.md](LICENSE.md) |
+| 其余部分（Client/、Server/、Plugin/ 等） | **MPL-2.0** | [LICENSE.md](LICENSE.txt) |
 
 - GPL 部分：分发二进制时必须一并提供对应源码；衍生作品同样以 GPL 发布。
 - MPL 部分：修改过的 MPL 文件需以 MPL 公开其源码，可与闭源代码组合。
