@@ -4,7 +4,7 @@
 
 > 本文件只描述状态，不承诺具体日期。已发布版本的行为请以 [Releases](https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer/releases) 与 [项目维基](https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer/wiki) 为准。
 
-## 手机端（V2.0.0.0，计划 2026-10-31 发布）
+## 手机端（V2.0.2）
 
 项目第 100 天，手机端首次发布。手机端与 PC 端共用同一套服务端与协议，可进同一个世界。
 
