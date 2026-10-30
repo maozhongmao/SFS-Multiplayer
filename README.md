@@ -33,7 +33,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - KCP 网络传输；需要可靠送达的业务包与高频状态包按类型分流。
 - 服务端权威处理关键多人事件。
 - 太空垃圾自动清理：失去控制且部件数低于阈值的碎片会被自动移除，阈值可在服务端配置。
-- 服务端插件系统（QuickJS）：服务端可加载预编译的 JS 字节码插件（`SFS_PLUGINS=1` 开启，默认关闭；关闭时产物与未引入前逐字节一致）。插件可读写日志、给指定玩家或全体发消息、读在线玩家名单，并接收世界快照/玩家进出/聊天/控制台命令等事件。
+- 服务端插件系统（QuickJS）：服务端可加载预编译的 JS 字节码插件（SFS_PLUGINS=1 开启，默认关闭；关闭时产物与未引入前逐字节一致）。插件可读写日志、给指定玩家或全体发消息、读在线玩家名单，并接收世界快照/玩家进出/聊天/控制台命令等事件。
 
 ## 使用前提
 
@@ -76,13 +76,13 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 
 | 范围 | 协议 | 条款 |
 |---|---|---|
-| Android/（手机端联机补丁：注入层 libsfsmp.so、跳板 libmain.so、补丁安装器） | **GPL-3.0** | [Android/LICENSE](Android/LICENSE.txt) |
+| Android/（注入层 libsfsmp.so、跳板 libmain.so、补丁安装器） | **GPL-3.0** | [Android/LICENSE](Android/LICENSE.txt) |
 | 其余部分（Client/、Server/、Plugin/ 等） | **MPL-2.0** | [LICENSE.md](LICENSE.txt) |
 
 - GPL 部分：分发二进制时必须一并提供对应源码；衍生作品同样以 GPL 发布。
 - MPL 部分：修改过的 MPL 文件需以 MPL 公开其源码，可与闭源代码组合。
 
-每个源码文件头部都带 `SPDX-License-Identifier` 标识，可据此判断单个文件适用哪份协议。
+每个源码文件头部都带 SPDX-License-Identifier 标识，可据此判断单个文件适用哪份协议。
 
 > 本仓库不包含 Spaceflight Simulator 的任何游戏源码、资源或游戏本体。手机端补丁是在用户自己的设备上，对已安装的正版游戏打补丁。
 
