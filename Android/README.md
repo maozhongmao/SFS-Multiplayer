@@ -1,7 +1,5 @@
 # Android 侧（SFS 手机端联机 UI / 注入补丁）
 
-来源：2026-10-21 从 `D:/SFS-Pro` + `D:/sfs-tools` 复制合并而来，未改动任何原文件。
-
 ## 目录
 | 目录 | 内容 |
 |---|---|
@@ -12,8 +10,6 @@
 | `research/native_ui/` | 5 份子 agent 研究报告 + `00_ROUTE.md` 总路线 + 反汇编小工具 |
 | `checkpoints/v44_native_textinput_ok/` | 可用存档点（含自己的 APK 副本、README、MANIFEST） |
 | `tools/` | `pack-so.ps1`（打包签名）、`scan_apk.py` |
-| `docs/` | 逆向/克隆/卖家分析报告（agent_A/B/C/E、ANALYSIS.md、native_button_clone_study.md 等） |
-| `screens/` | 28 张过程截图（主菜单、克隆窗、原生输入框、崩溃现场） |
 
 ## 构建（需要 NDK，路径在本机 `D:/sfs-tools/ndk/android-ndk-r27c`）
 ```bash
