@@ -24,12 +24,15 @@
 
 /* v129: 路径跟随运行时包名（由 v64.c 的 sfsmp_set_package 决定）。共存版换了包名也能写进自己的目录。 */
 extern const char* sfsmp_dp(const char* name);
+/* v130: 关键事件同时写到 /sdcard/Android/media/<包名>/log.txt（由 v64.c 实现并做逐帧行过滤） */
+extern void sfsmp_media_log(const char* m);
 #define MP_MARKER (sfsmp_dp("sfsmp-probe.txt"))
 #define MP_SERVER (sfsmp_dp("sfsmp-server.txt"))
 
 static void mp_log(const char* m){
     int fd = open(MP_MARKER, O_WRONLY|O_CREAT|O_APPEND, 0644);
     if(fd >= 0){ write(fd, m, strlen(m)); close(fd); }
+    sfsmp_media_log(m);
 }
 
 /* ---------- 位写入器（Lidgren LSB-first） ---------- */
@@ -278,10 +281,11 @@ static void rr_parse_create(const unsigned char* p, int nbytes, int* out_lid, in
 }
 
 
-static char  g_host[96] = "192.168.1.5";
+static char  g_host[96] = "";   /* v187: 没有默认服务器地址，必须由 UI 传入 */
 static int   g_port = 9806;
 static int   g_fd = -1;
 static ikcpcb* g_kcp = NULL;
+static IUINT32 g_kcp_next = 0;   /* v186: 下一次 ikcp_update 时刻（ms，ikcp_check 返回） */
 
 static int mp_output(const char* buf, int len, ikcpcb* kcp, void* user){
     (void)kcp; (void)user;
@@ -445,7 +449,7 @@ static int send_msg(const unsigned char* frame, int n){
     { char hx[200]; int k=0; k+=snprintf(hx+k,sizeof(hx)-k,"mp: tx n=%d hex=", n);
       for(int i=0;i<n && i<24 && k<(int)sizeof(hx)-4;i++) k+=snprintf(hx+k,sizeof(hx)-k,"%02X", frame[i]);
       k+=snprintf(hx+k,sizeof(hx)-k,"\n"); mp_log(hx); }
-    return ikcp_send(g_kcp, (const char*)buf, n + 4);
+    { int r = ikcp_send(g_kcp, (const char*)buf, n + 4); if (r >= 0) ikcp_flush(g_kcp); return r; }
 }
 
 /* v73: 大消息（完整火箭结构可达几十上百 KB）。KCP 会自己分片，这里只补 4 字节长度前缀。 */
@@ -455,7 +459,7 @@ static int send_msg_big(const unsigned char* frame, int n){
     w_u32(buf, (unsigned)n);
     memcpy(buf+4, frame, (size_t)n);
     { char b2[96]; snprintf(b2,sizeof(b2),"mp: tx-big n=%d\n", n); mp_log(b2); }
-    return ikcp_send(g_kcp, (const char*)buf, n + 4);
+    { int r = ikcp_send(g_kcp, (const char*)buf, n + 4); if (r >= 0) ikcp_flush(g_kcp); return r; }
 }
 
 
@@ -733,8 +737,12 @@ static void* mp_thread(void* arg){
     g_kcp = ikcp_create((IUINT32)(mp_now_ms() & 0x7fffffff), NULL);
     if(!g_kcp){ mp_log("mp: ikcp_create failed\n"); g_mp_started = 0; return NULL; }
     ikcp_setoutput(g_kcp, mp_output);
-    ikcp_nodelay(g_kcp, 1, 10, 0, 1);
-    ikcp_wndsize(g_kcp, 256, 256);
+    /* v186：KCP 参数全面对齐服务端（Server/cpp/src/net/kcp_transport.hpp + ADR-001）。
+     * 之前只对齐了 nodelay，漏了 MTU 显式设置和接收窗口（服务端 256/512，我们一直是 256/256，
+     * 快照/结构包一多就压不住，回包延迟被放大）。 */
+    ikcp_nodelay(g_kcp, 1, 10, 0, 1);   /* kNodelay=1, kIntervalMs=10, kFastResend=0, kNoCongestion=1 */
+    ikcp_setmtu(g_kcp, 1400);           /* kMtu = 1400 */
+    ikcp_wndsize(g_kcp, 256, 512);      /* 与服务端 ikcp_wndsize(256, 512) 一致 */
 
     unsigned char hello[512];
     int hn = build_hello(hello, sizeof(hello), "android", "", "", -1, "");
@@ -749,8 +757,12 @@ static void* mp_thread(void* arg){
     static unsigned char kb[65536];   /* v72: 收包缓冲放大到 64KB，之前 4KB 一旦收到大包就永久堵死 */
     for(int iter = 0; ; iter++){                     /* v65: 常驻，不再 90 秒后自己退出 */
         unsigned long long now = mp_now_ms();
-        ikcp_update(g_kcp, (IUINT32)now);
-        ikcp_flush(g_kcp);
+        /* v186：按 ikcp_check 的返回值调度 update（服务端 kcp_transport.cpp:455-462 同款策略），
+         * 不再每轮无条件 update+flush —— 原来每 10ms 都强制 flush，空转唤醒多、CPU 抖动大。 */
+        if (g_kcp_next == 0 || (IUINT32)now >= g_kcp_next) {
+            ikcp_update(g_kcp, (IUINT32)now);
+            g_kcp_next = ikcp_check(g_kcp, (IUINT32)now);
+        }
 
         int rn = (int)recv(g_fd, rx, sizeof(rx), 0);
         if(rn > 0){
@@ -879,7 +891,12 @@ static void* mp_thread(void* arg){
                 ctl_logs++;
             }
         }
-        usleep(10000);
+        /* v186：睡到「下一次 KCP update」为止（1–10ms），比固定 10ms 唤醒更省电也更准时 */
+        { IUINT32 n2 = (IUINT32)mp_now_ms();
+          int wait = (int)(g_kcp_next - n2);
+          if (wait < 1) wait = 1;
+          if (wait > 10) wait = 10;
+          usleep((useconds_t)wait * 1000u); }
     }
     mp_log("mp: thread exit\n");
     g_mp_started = 0;   /* v164: 允许再次连接 */
@@ -891,6 +908,10 @@ static int g_mp_started = 0;
 
 void mp_net_connect(const char* hostport){
     if(g_mp_started) return;
+    /* v187: 没有默认服务器地址 —— 玩家没填就什么都不做，由上层提示去填 */
+    if(!hostport || !hostport[0]){
+        if(!g_host[0]){ mp_log("mp: no endpoint configured -> skip connect\n"); return; }
+    }
     g_mp_started = 1;
     if(hostport && hostport[0]){
         snprintf(g_host, sizeof(g_host), "%s", hostport);

@@ -26,6 +26,8 @@ constexpr std::size_t kMaxHandshakeStringBytes = 4096;
 
 // 对应 JoinRequestPacket。
 struct JoinRequest {
+    // 客户端平台：0=未上报（老客户端/PC），1=Android。追加在 Hello 尾部，老服务端忽略。
+    std::uint8_t platform = 0;
     std::string username;
     std::string password;
     std::string solar_system_name;

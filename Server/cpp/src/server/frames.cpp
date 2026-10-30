@@ -109,6 +109,7 @@ void Server::handle_frame(int fd, const TcpFrame& frame) {
             auto it = conns_.find(fd);
             if (it == conns_.end()) break;
             Connection& c = it->second;
+            c.platform = req.platform;   // 手机端上报 1，PC/老客户端 0
             const bool first_handshake = !c.handshaked;
             if (first_handshake) {
                 // 断线重连判定（对齐 C#：ResumePlayerId >= 0 且 token 匹配则复用原会话，

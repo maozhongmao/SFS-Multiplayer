@@ -1,12 +1,9 @@
-
-# 手机端：官方 APK 基线不入库（体积 + 版权）
-Android/tools/manifest-baseline/
-Android/*.7z.*
-Android/patchapp/assets/
-Android/patchapp/keys/
-Android/patchapp/keystore/
+# 鏋勫缓浜х墿
+bin/
+obj/
+*.dll
+*.pdb
+*.o
 *.so
-*.apk
-*.dex
-*.idsig
-*.jks
+*.exe
+!Server/cpp/build/verify-out/*.exe

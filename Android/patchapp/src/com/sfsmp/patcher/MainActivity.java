@@ -52,6 +52,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle b) {
         super.onCreate(b);
+        FileLog.init(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.parseColor("#121212"));
@@ -71,14 +72,6 @@ public class MainActivity extends Activity {
         sub.setPadding(0, dp(2), 0, dp(10));
         root.addView(sub);
 
-        if (!Pack.verifySelf(getPackageManager(), getPackageName())) {
-            status = new TextView(this);
-            status.setText("签名校验失败：本安装器被改动过，拒绝运行。");
-            status.setTextSize(16);
-            root.addView(status);
-            setContentView(root);
-            return;
-        }
 
         status = new TextView(this);
         status.setTextColor(Color.parseColor("#E0E0E0"));
@@ -167,15 +160,18 @@ public class MainActivity extends Activity {
     void pg(final int v) { ui.post(new Runnable() { public void run() { if (pbBar != null) pbBar.setProgress(v); } }); }
 
     void say(final String s) {
-        try {
-            File f = new File(getExternalFilesDir(null), "patcher.log");
-            FileOutputStream fo = new FileOutputStream(f, true);
-            try { fo.write((s + "\n").getBytes("UTF-8")); } finally { fo.close(); }
-        } catch (Throwable ignored) { }
+        FileLog.line("UI", s);
         ui.post(new Runnable() { public void run() {
             log.append(s + "\n");
             logScroll.post(new Runnable() { public void run() { logScroll.fullScroll(View.FOCUS_DOWN); } });
         } });
+    }
+
+    /** 统一失败出口：完整堆栈写文件，界面只留一行。 */
+    void fail(String what, Throwable t) {
+        FileLog.line("FAIL", what);
+        FileLog.t("FAIL:" + what, t);
+        say(what + ": " + t);
     }
 
     PackageInfo gameInfo() {
@@ -207,7 +203,8 @@ public class MainActivity extends Activity {
         sb.append("启动类：").append(String.valueOf(gameLauncher())).append("\n");
         sb.append("路径：").append(ai.sourceDir).append("\n");
         sb.append("大小：").append(apk.length() / (1024 * 1024)).append(" MB\n");
-        sb.append("架构：").append(Build.SUPPORTED_ABIS[0]);
+        sb.append("架构：").append(Build.SUPPORTED_ABIS[0]).append("\n");
+        sb.append("日志：").append(FileLog.path());
         status.setText(sb.toString());
         say("检测到游戏 " + pi.versionName + " (" + pi.versionCode + ")");
     }
@@ -383,29 +380,40 @@ public class MainActivity extends Activity {
     }
 
     void installApk(File apk) throws Exception {
+        FileLog.line("INSTALL", "apk=" + apk.getAbsolutePath() + " bytes=" + apk.length()
+                + " exists=" + apk.isFile() + " readable=" + apk.canRead());
         PackageInstaller pi = getPackageManager().getPackageInstaller();
         PackageInstaller.SessionParams p = new PackageInstaller.SessionParams(
                 PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+        p.setSize(apk.length());
         int id = pi.createSession(p);
+        FileLog.line("INSTALL", "createSession id=" + id);
         PackageInstaller.Session s = pi.openSession(id);
+        FileLog.line("INSTALL", "openSession ok");
         try {
             InputStream in = new FileInputStream(apk);
             OutputStream out = s.openWrite("base.apk", 0, apk.length());
+            long written = 0;
             try {
                 byte[] buf = new byte[1 << 16];
                 int n;
-                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                while ((n = in.read(buf)) > 0) { out.write(buf, 0, n); written += n; }
+                FileLog.line("INSTALL", "write done bytes=" + written);
                 s.fsync(out);
+                FileLog.line("INSTALL", "fsync ok");
             } finally { in.close(); out.close(); }
             PendingIntent cb = PendingIntent.getActivity(this, 2,
                     new Intent(this, ConfirmActivity.class),
                     PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
+            FileLog.line("INSTALL", "calling commit sender=" + (cb == null ? "null" : "ok"));
             s.commit(cb.getIntentSender());
+            FileLog.line("INSTALL", "commit returned (session committed)");
             say("安装会话已提交，等待系统安装器…");
         } catch (Throwable t) {
-            say("安装会话失败: " + t);
+            FileLog.line("INSTALL", "installApk threw");
+            FileLog.t("INSTALL", t);
             throw t;
-        } finally { s.close(); }
+        } finally { s.close(); FileLog.line("INSTALL", "session closed"); }
     }
 
     void doInstall() {
@@ -433,7 +441,7 @@ public class MainActivity extends Activity {
                         return;
                     }
                     say("补丁已安装：" + target);
-                } catch (Throwable t) { say("安装失败: " + t); }
+                } catch (Throwable t) { fail("安装失败", t); }
                 finally { ui.post(new Runnable() { public void run() { btnInstall.setEnabled(true); } }); }
             } }).start();
             return;
@@ -461,7 +469,7 @@ public class MainActivity extends Activity {
                 say("存档已恢复 " + (m / 1048576) + " MB");
                 say("全部完成，可以启动游戏了");
             } catch (Throwable t) {
-                say("安装流程失败: " + t);
+                fail("安装流程失败", t);
                 say("存档备份仍在: " + backup.getAbsolutePath());
             } finally {
                 ui.post(new Runnable() { public void run() { btnInstall.setEnabled(true); } });
