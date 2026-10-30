@@ -24,7 +24,6 @@ Server/
 ├─ server.example.json      **.NET 服务端**的配置示例（旧格式，勿混用）
 ├─ SfsMultiplayer.sln       .NET 解决方案
 ├─ LICENSE                  MPL-2.0
-├─ LICENSE-GPL-3.0.legacy.txt  历史许可（早期版本曾是 GPL，保留备查）
 └─ THIRD-PARTY-NOTICES.md   第三方组件声明
 ```
 
