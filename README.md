@@ -16,7 +16,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - `Server/`：独立联机服务端源码。
 - `.gitignore`：垃圾文件。
 - `.gitattributes`：垃圾文件。
-- `LICENCE.txt`：本项目的 [MPL LICENSE](LICENSE.txt)；手机端的为 [GPL-3.0 LICENSE](Android/LICENSE.txt)。
+- `LICENCE.txt`：本项目的 [MPL LICENSE](LICENSE.txt)；手机端为 [GPL-3.0 LICENSE](Android/LICENSE.txt)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
 
