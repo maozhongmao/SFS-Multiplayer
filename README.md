@@ -82,7 +82,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - GPL 部分：分发二进制时必须一并提供对应源码；衍生作品同样以 GPL 发布。
 - MPL 部分：修改过的 MPL 文件需以 MPL 公开其源码，可与闭源代码组合。
 
-每个源码文件头部都带 `SPDX-License-Identifier` 标识，可据此判断单个文件适用哪份协议。
+每个源码文件头部都带 SPDX-License-Identifier 标识，可据此判断单个文件适用哪份协议。
 
 > 本仓库不包含 Spaceflight Simulator 的任何游戏源码、资源或游戏本体。手机端补丁是在用户自己的设备上，对已安装的正版游戏打补丁。
 
