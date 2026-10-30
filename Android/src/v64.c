@@ -1,15 +1,15 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
-// v43: SFS-Pro route — NOJ drawer Open()+Draw* ; v41: probe mode — no overlay button; auto-summon the cloned '多人联机' button when the main menu is ready; click -> login page.
+// v43: 参考实现路线 — NOJ drawer Open()+Draw* ; v41: probe mode — no overlay button; auto-summon the cloned '多人联机' button when the main menu is ready; click -> login page.
 //   * the direct UnityEngine.Object.Instantiate call is DEAD (v28/v29: it dies inside libunity
 //     because an internal lookup returns NULL) - so let the game's own managed code do it.
-//   * panel class = obfuscated NOJZIZCFSEXSUEEX (dump.cs:21261) = the SFS.UI.ModGUI window class;
+//   * panel class = obfuscated NOJZIZCFSEXSUEEX  = the SFS.UI.ModGUI window class;
 //     methods keep their names: DrawFullButton(int,string,Action,bool) RVA 0x18DDCF8.
 //   * keeps the v22/v26 IL2CPP plumbing + WorldTime.Update main-thread hook
 //   * adds the v27 Android overlay button, but the button does NOT draw our UI any more:
 //     tapping it just sets a flag, and the clone is executed on the next WorldTime.Update
 //     tick (= proven UnityMain thread).
-//   * Instantiate overload is picked by (methodPointer - libil2cpp base) == RVA from dump.cs:
-//         Instantiate(Object,Transform,bool)  RVA 0x2FC1B58   <- the one SFS-Pro uses
+//   * Instantiate overload is picked by (methodPointer - libil2cpp base) == RVA from dump:
+//         Instantiate(Object,Transform,bool)  RVA 0x2FC1B58   <- 已知实现所用
 //         Instantiate(Object)                 RVA 0x2FC19C4
 //         get_name RVA 0x2FC1138 / set_name RVA 0x2FC1280 are used to calibrate the base.
 #include <jni.h>
@@ -27,7 +27,9 @@
 #include <sys/mman.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <unwind.h>
 #include "mp_types.h"
+#define SFSMP_VERSION "2.0.3.2-diag"   /* 与安装器 / PC 端 / 服务端统一；带后缀用于区分诊断包 */
 
 /* v129: 数据目录运行时化 —— 共存版（改过包名）的 /sdcard/Android/data/<包名>/files 和官方不是同一个，
  * 写死官方包名会导致新包里探针/配置全部静默失效（不同 uid 根本写不进去）。 */
@@ -45,12 +47,16 @@ const char* sfsmp_dp(const char* name){
 static const char* pkg(void){ return g_pkgName; }
 static const char* mediaDir(void){ return g_mediaDir; }
 
+void sfsmp_media_log(const char* m);
 void sfsmp_set_package(const char* p){
     if (!p || !p[0]) return;
     if (strlen(p) > 90) return;
     snprintf(g_pkgName, sizeof(g_pkgName), "%s", p);
     snprintf(g_dataDir,  sizeof(g_dataDir),  "/sdcard/Android/data/%s/files", p);
     snprintf(g_mediaDir, sizeof(g_mediaDir), "/sdcard/Android/media/%s", p);
+    { char b[260];
+      snprintf(b, sizeof(b), "NATIVE boot version=%s pkg=%s media=%s\n", SFSMP_VERSION, g_pkgName, g_mediaDir);
+      sfsmp_media_log(b); }
 }
 #define MARKER (dp("sfsmp-probe.txt"))
 static volatile int g_mode = 1;
@@ -60,7 +66,97 @@ static volatile int g_mode = 1;
 static int read_mode(void){
     return 20;
 }
-static void log_app(const char* m){ int fd=open(MARKER,O_WRONLY|O_CREAT|O_APPEND,0644); if(fd>=0){write(fd,m,strlen(m));close(fd);} }
+/* v130: 日志落盘到媒体目录 —— /sdcard/Android/media/<包名>/log.txt
+ * 目的：不需要 adb，用户在文件管理器里就能拿到日志发给开发者。
+ * Android/media/<自己包名> 是应用专属媒体目录，File API 直接可读写、不需要任何权限。
+ * 只落「关键事件」；逐帧的 mp: tx / packet type= / ROCKET id= 仍然只进 files/sfsmp-probe.txt（全量，给 adb 用）。
+ * 由 mp_net.c 的 mp_log 也会回调这里，所以联机侧事件（JOIN OK / REMOTE CREATE 等）同样会进去。 */
+void sfsmp_media_log(const char* m){
+    char path[256]; int fd;
+    if (!m || !m[0]) return;
+    if (strncmp(m, "mp: tx ", 7) == 0) return;
+    if (strncmp(m, "mp: tx-big", 10) == 0) return;
+    if (strncmp(m, "mp: packet type=", 16) == 0) return;
+    if (strncmp(m, "mp: ROCKET id=", 15) == 0) return;
+    if (strncmp(m, "mp: pong", 8) == 0) return;
+    if (strncmp(m, "mp: waiting ack", 15) == 0) return;
+    mkdir(g_mediaDir, 0770);
+    snprintf(path, sizeof(path), "%s/log-native.txt", g_mediaDir);
+    fd = open(path, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    if (fd < 0) return;
+    write(fd, m, strlen(m));
+    close(fd);
+}
+
+/* ================= v132: native 崩溃现场 =================
+ * Java 的 UncaughtExceptionHandler 抓不到 SIGSEGV/SIGABRT；这里用 sigaction + _Unwind_Backtrace
+ * 把信号、故障地址、调用栈写进 log-native.txt，然后再交回默认处理（进程照常终止）。
+ * 两个日志分工：log-java.txt = Java 层（生命周期/异常）；log-native.txt = native 层（hook/mp/崩溃栈）。
+ */
+struct sfsmp_unwind { int fd; int count; };
+static _Unwind_Reason_Code sfsmp_unwind_cb(struct _Unwind_Context* ctx, void* arg){
+    struct sfsmp_unwind* u = (struct sfsmp_unwind*)arg;
+    uintptr_t pc = (uintptr_t)_Unwind_GetIP(ctx);
+    char buf[256]; int n;
+    if (!pc) return _URC_END_OF_STACK;
+    if (++u->count > 32) return _URC_END_OF_STACK;
+    /* v152: 用 dladdr 把地址翻成「库名+偏移」，否则光有 pc 根本没法定位（ASLR 每次不同）。 */
+    { Dl_info di; memset(&di, 0, sizeof(di));
+      if (dladdr((void*)pc, &di) && di.dli_fname) {
+          const char* base = strrchr(di.dli_fname, '/');
+          base = base ? base + 1 : di.dli_fname;
+          n = snprintf(buf, sizeof(buf), "CRASH   frame[%02d] %s+0x%lx (pc=0x%lx)\n",
+                       u->count, base, (unsigned long)(pc - (uintptr_t)di.dli_fbase), (unsigned long)pc);
+      } else {
+          n = snprintf(buf, sizeof(buf), "CRASH   frame[%02d] ?+0x0 (pc=0x%lx)\n", u->count, (unsigned long)pc);
+      } }
+    if (n > 0) write(u->fd, buf, (size_t)n);
+    return _URC_NO_REASON;
+}
+static const char* sfsmp_signame(int sig){
+    switch (sig){
+        case SIGSEGV: return "SIGSEGV";
+        case SIGABRT: return "SIGABRT";
+        case SIGBUS:  return "SIGBUS";
+        case SIGILL:  return "SIGILL";
+        case SIGFPE:  return "SIGFPE";
+        case SIGTRAP: return "SIGTRAP";
+        default:      return "SIGNAL";
+    }
+}
+static void sfsmp_crash_handler(int sig, siginfo_t* si, void* uc){
+    char path[256], buf[192]; int fd, n;
+    (void)uc;
+    mkdir(g_mediaDir, 0770);
+    snprintf(path, sizeof(path), "%s/log-native.txt", g_mediaDir);
+    fd = open(path, O_WRONLY|O_CREAT|O_APPEND, 0666);
+    if (fd >= 0){
+        n = snprintf(buf, sizeof(buf), "CRASH signal=%d (%s) addr=%p thread=%lu\n",
+                     sig, sfsmp_signame(sig), si ? si->si_addr : (void*)0,
+                     (unsigned long)pthread_self());
+        if (n > 0) write(fd, buf, (size_t)n);
+        { struct sfsmp_unwind u; u.fd = fd; u.count = 0; _Unwind_Backtrace(sfsmp_unwind_cb, &u); }
+        write(fd, "CRASH end\n", 10);
+        close(fd);
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+static void sfsmp_install_crash_handler(void){
+    static int installed = 0;
+    int sigs[6], i;
+    struct sigaction sa;
+    if (installed) return;
+    installed = 1;
+    sigs[0] = SIGSEGV; sigs[1] = SIGABRT; sigs[2] = SIGBUS;
+    sigs[3] = SIGILL;  sigs[4] = SIGFPE;  sigs[5] = SIGTRAP;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = sfsmp_crash_handler;
+    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    for (i = 0; i < 6; i++) sigaction(sigs[i], &sa, NULL);
+}
+static void log_app(const char* m){ int fd=open(MARKER,O_WRONLY|O_CREAT|O_APPEND,0644); if(fd>=0){write(fd,m,strlen(m));close(fd);} sfsmp_media_log(m); }
 
 /* v30 globals */
 static void* (*g_gm)(void*, const char*, int)=NULL;    /* il2cpp_class_get_method_from_name */
@@ -256,10 +352,10 @@ static void* g_srcBtn=NULL; static void* g_mEvtInvoke=NULL; static int g_autoSta
 /* ---- v64: enter the world through the game's own scene loader ---- */
 static void* g_sceneLoaderCls=NULL, *g_typeSceneLoader=NULL, *g_mLoadWorldScene=NULL, *g_mLoadHubScene=NULL;
 /* v100: 进世界前把视角钉到发射台（PC 端 DivertLoading 同款：WorldView.main.SetViewLocation(Base.planetLoader.spaceCenter.LaunchPadLocation)）
- * WorldView = SFS.World.ZIMVTWPJZBTPPXSR（dump.cs:26023），静态 main @0x0，SetViewLocation(Location) RVA 0x16CC208（dump.cs:26115）
- * Base = SFS.RQOFTSKFXWRDBQCA（dump.cs:40945），planetLoader @0x40（dump.cs:40952）
- * planetLoader = SFS.WorldBase.YXHFAUIATGCKNHYQ（dump.cs:8660），spaceCenter @0x60（dump.cs:8678）
- * SpaceCenterData.LaunchPadLocation getter RVA 0x17AC594（dump.cs:4742/4750） */
+ * WorldView = SFS.World.ZIMVTWPJZBTPPXSR，静态 main @0x0，SetViewLocation(Location) RVA 0x16CC208
+ * Base = SFS.RQOFTSKFXWRDBQCA，planetLoader @0x40
+ * planetLoader = SFS.WorldBase.YXHFAUIATGCKNHYQ，spaceCenter @0x60
+ * SpaceCenterData.LaunchPadLocation getter RVA 0x17AC594 */
 static void* g_worldViewCls=NULL, *g_worldViewMainField=NULL, *g_mSetViewLocation=NULL;
 static void* g_baseCls=NULL, *g_typeBase=NULL;
 static int g_offPlanetLoader=0;
@@ -332,17 +428,17 @@ static void publish_local_pose(void){
      * （我们自己 rr_try_spawn 生成的 'MP-Remote'，坐标 631xxx ≈ 2 倍地球半径），
      * 就会把**它的地心坐标当成自己的**发出去。这正是"别人看你飞 300 多公里"的真凶。
      *
-     * 基类 DXYTHXTABGUDBUFN（dump.cs:21647）：
+     * 基类 DXYTHXTABGUDBUFN：
      *   location 0x38 / mapPlayer 0x40 / isPlayer 0x48 / hasControl 0x50
-     * 两者都是 Bool_Local : Obs<bool>，Obs<T> 的字段 value 在 0x0（dump.cs:45593），
+     * 两者都是 Bool_Local : Obs<bool>，Obs<T> 的字段 value 在 0x0，
      * 加上 Il2Cpp 对象头 0x10 ⇒ 布尔值在 +0x10。
      *
      * 选取优先级：hasControl(1) > isPlayer(2) > 都没有(0，拒绝上报)。
      * 以前还会兜底 data[0]，现在**兜底已删除** —— 宁可这一帧不报，也不能把别人的火箭当成自己。 */
     /* v118: 唯一权威来源 —— PlayerController.main.player.Value。
-     * 权威源码 D:/sfs-tools/ref/PCSFS/SFS.World/PlayerController.cs:32-34
+     * 权威源码 游戏内 SFS.World.PlayerController
      *   public static PlayerController main;  public Player_Local player;
-     * Player_Local : Obs_Destroyable<Player> : Obs<Player>（SFS.Variables/Obs_Destroyable.cs:6、Obs.cs:11）
+     * Player_Local : Obs_Destroyable<Player> : Obs<Player>（SFS.Variables/Obs_Destroyable、Obs）
      *   private T value;  ⇒ 火箭对象在 obs 对象 +0x10。
      *
      * 为什么废掉 v109/v111 的"猜 hasControl / 猜 isPlayer / 猜名字"：
@@ -407,11 +503,11 @@ static void publish_local_pose(void){
     void* pl=*(void**)((char*)lv+0x18);
     char pname[40]="Earth"; if(pl) obj_name(pl, pname, sizeof(pname));
     /* v107: 角度必须用和 PC 端完全相同的定义。
-     * 权威：D:/sfs-tools/ref/PCSFS/SFS.World/RocketSave.cs:43
+     * 权威：游戏内 SFS.World.RocketSave
      *   rotation = rocket.rb2d.transform.eulerAngles.z;
-     * D:/SFS-Multiplayer/Client/src/MultiplayerSFS.Client/MultiplayerSFS.Mod/LocalManager.cs:1227 同款
+     * PC 端源码 同款
      *
-     * v103 发的是 Rocket.GetRotation() —— 那是**地图图标朝向**（SFS.World/Rocket.cs:267 硬 +90f），
+     * v103 发的是 Rocket.GetRotation() —— 那是**地图图标朝向**（SFS.World/Rocket 硬 +90f），
      * 不是物体朝向 -> 对端恒定偏 90°。
      * v107 改用 Rigidbody2D.get_rotation（无参、返回 float，Unity 里与 transform.eulerAngles.z 恒等），
      * 不用 get_eulerAngles + Vector3.z —— 那条路返回结构体走隐藏指针，偏移极易写错（v106 就写错了）。
@@ -432,7 +528,7 @@ static void publish_local_pose(void){
                 if(v && !e6) av = *(float*)g_unbox(v);
             }
             /* v114: PC 端写回的字段是 rocket.rb2d.transform.eulerAngles.z
-             * （Client/.../LocalManager.cs:1294 和 :1735 两处都是 new Vector3(0f,0f,state.rotation)），
+             * （Client/.../LocalManager 和 :1735 两处都是 new Vector3(0f,0f,state.rotation)），
              * 不是 rb2d.rotation。两者只在 transform 没有旋转父级时相等。
              * 所以这里同时取 transform.eulerAngles.z 做对照：
              *  - eulerOk=1 就用 euler 值（和 PC 完全同源）；
@@ -476,7 +572,7 @@ static void publish_local_pose(void){
         /* v127: 0° 是合法角度（火箭直立停在发射台就是 0），不能当"读失败"哨兵。
          * bug-hunter 实测：手机端上行恒定发 rot=90.00，就是因为 euler 读到 0.00 后
          * 被这个哨兵判定成失败、回退到 GetRotation()（atan2 推力矢量 = 90°）。
-         * PC 端上行下行都用 transform.eulerAngles.z（LocalManager.cs:1227/1294/1735），
+         * PC 端上行下行都用 transform.eulerAngles.z（LocalManager），
          * 所以只要这里不再回退，两端就同源。 */
         if(!g_lastEulerOk && g_mGetRot){ void* e4=NULL; void* r=g_ri(g_mGetRot, ro, NULL, &e4);
             if(r && !e4) rot = *(float*)g_unbox(r) - 90.0f; }
@@ -1020,8 +1116,8 @@ static void* make_ti_action(void);
 static void* (*g_arrayNew)(void*, uintptr_t)=NULL;
 
 /* ================= v126: 上行变量字典 =================
- * 零件尺寸/开关/文本都住在 PartSave 的三个 Dictionary 里（PartSave.cs:28-30）。
- * PC 端建零件时走 PartsLoader.cs:137 doubleVariables.LoadDictionary(partSave.NUMBER_VARIABLES, ...)，
+ * 零件尺寸/开关/文本都住在 PartSave 的三个 Dictionary 里（PartSave）。
+ * PC 端建零件时走 PartsLoader doubleVariables.LoadDictionary(partSave.NUMBER_VARIABLES, ...)，
  * 字典为空 = 全用默认值（所以尺寸永远停在 1）。这里把字典枚举出来，交给 mp_net.c 编码上行。
  * 枚举方式：Dictionary.get_Count → get_Keys → KeyCollection.CopyTo(string[], 0) → get_Item(key)。
  */
@@ -1758,7 +1854,7 @@ static void page_show_login(void)
 
     for (i = 0; i < 3; ++i) {
         const char* lbl = i == 0 ? "Server" : (i == 1 ? "Username" : "Password");
-        const char* val = i == 0 ? "192.168.1.5" : (i == 1 ? "yangchengtong" : "");
+        const char* val = "";   /* v187: 不再预填地址/用户名 —— 玩家必须自己填，没填就提示 */
         int itype = i == 2 ? 0x81 : 1;
         jobject L, E;
         row = v37_lin(e, 0);
@@ -1991,9 +2087,9 @@ static void native_window_test(void)
 /* ================= v64: "多人联机" button == connect + enter the world =================
  * 用户硬要求（m01348）：入口必须是我们自己的按钮，原版「开始游戏」只能用于单人，不算。
  * 所以点按钮时我们做两件事：
- *   1) 连服务器（地址优先取 sfsmp-connect.txt，其次弹窗里读到的值，最后默认 192.168.1.5:9806）
+ *   1) 连服务器（地址只取玩家在弹窗里填的值；没填就提示回去填，绝不自动连）
  *   2) 直接请游戏自己的场景加载器加载世界场景：
- *      SFS.USPVHOMQUKUGZPLU.LoadWorldScene(bool)  RVA 0x16EE994  (dump.cs:28962-29037)
+ *      SFS.USPVHOMQUKUGZPLU.LoadWorldScene(bool)  RVA 0x16EE994  
  *      同一个类里还有 LoadHomeScene / LoadHubScene / LoadBuildScene，说明它就是场景切换总入口，
  *      世界卡片上的「开始游戏」背后调的就是它。调用走 il2cpp_runtime_invoke(实例, 参数)，
  *      不碰 methodPointer，也不手搓委托。
@@ -2002,7 +2098,7 @@ static const char* mp_pick_endpoint(char* buf, int cap){
     /* v116: 唯一来源就是 IP 页面里玩家自己填的地址。
      * 删掉两条隐形回退：
      *   a) 读 sfsmp-connect.txt（我本机测试的残留文件会让玩家"自己连上某个服务器"）；
-     *   b) 硬编码 192.168.1.5:9806（玩家没填也被连到我家的服务器）。
+     *   b) 没有默认地址（玩家没填就不连）。
      * 玩家没填就不连 —— 这是产品行为，不是测试开关。 */
     (void)buf; (void)cap;
     if (g_tiVal[0][0]) return g_tiVal[0];
@@ -2018,6 +2114,8 @@ static const char* mp_pick_endpoint(char* buf, int cap){
  *   ② 世界卡片上的「开始游戏」→ 真正进世界
  * 只动 clickEvent(0x48=ClickUnityEvent)，不碰 onClick(0x68)。 */
 static volatile int g_wcStep = 0, g_wcTimer = 0, g_autoEnterTried = 0;
+/* v187: 玩家没填服务器地址时置 1，由 nativeTick（有 JNIEnv）负责在页面标签上提示一次 */
+static volatile int g_promptEp = 0;
 static volatile int g_openListStep = 0, g_openListTimer = 0;   /* v89: 连接后替玩家点游戏原生 UI（Play Button -> 世界卡） */
 static volatile int g_uStep = 0, g_uTimer = 0;   /* v86: 标准 UnityEvent 点按钮的两步状态机 */
 /* v110: 远端火箭渲染重新开启，但加了"熔断"保险。
@@ -2214,13 +2312,14 @@ static void connect_and_enter_world(void){
      *   1) g_pendingEp —— 弹窗回调里就已经定好的地址（回调写入 g_tiVal 的同时也写这里）；
      *   2) g_tiVal[0] —— 弹窗回调直接回填的字符串；
      * 两者都没有才是"玩家什么都没填"。
-     * v116 只看了 mp_pick_endpoint(=g_tiVal)，结果回调明明回了 '192.168.1.5'
+     * v116 只看了 mp_pick_endpoint(=g_tiVal)，结果回调明明回了地址
      * 却被判成"没填"，于是既不连也不进世界。 */
     const char* ep = (g_pendingEp[0]) ? g_pendingEp : mp_pick_endpoint(epbuf, sizeof(epbuf));
     if (!ep || !ep[0]) {
         /* v116: 玩家没填服务器地址 —— 不连，也不进世界。
          * 宁可什么都不做，也不能用隐藏默认值把人连到别人的服务器上。 */
         log_app("v116: no endpoint entered -> skip connect\n");
+        g_promptEp = 1;   /* v187: 让 UI 提示玩家回去填地址 */
         return;
     }
     snprintf(b,sizeof(b),"v97: MP click -> connect '%s'\n", ep); log_app(b);
@@ -2229,7 +2328,7 @@ static void connect_and_enter_world(void){
     g_enterWait = 0;
     g_enterLogs = 0;
     /* ---- v97: 连上之后按官方链路进世界 ----------------------------------------
-     * 链路（照抄 WorldsMenu.cs:70-79）：
+     * 链路（照抄 WorldsMenu）：
      *   enter_world_official() -> WorldBaseManager.EnterWorld("sfsmp_tmp", cb)
      *     -> 游戏 LoadSolarSystem -> 回调 enter_done_cb -> g_wantLoadWorld=1
      *       -> hook_update 下一帧 Base.sceneLoader.LoadWorldScene(false)
@@ -2256,7 +2355,7 @@ static void connect_and_enter_world(void){
  * 背景：v45 里第 3 参（Action<string[]>）传 NULL ⇒ 点「加入服务器」没有任何回调，世界进不去。
  * 现在造一个真能用 Action<string[]>：il2cpp_object_new(Action<string[]>) 后
  *   method_ptr(0x10) / invoke_impl(0x18) = 本文件的 native 回调
- *   method(0x28) = Action<string[]>::Invoke 的真实 MethodInfo（这一格是 NULL 就崩，SFS-Pro 报告有记载）
+ *   method(0x28) = Action<string[]>::Invoke 的真实 MethodInfo（这一格是 NULL 就崩，有公开报告记载）
  * 游戏点「加入服务器」时就会进到这里：拿到 3 行输入 → 连服务器 → 进世界。
  */
 static volatile int g_tiCbHits = 0;
@@ -2275,7 +2374,8 @@ __attribute__((noinline, used)) static void ti_callback(void* self, void* args, 
         }
     }
     /* v67: 不在回调里直接切场景 —— 先让 Confirm()/OnClose() 把弹窗收尾做完 */
-    strncpy(g_pendingEp, g_tiVal[0][0] ? g_tiVal[0] : "192.168.1.5:9806", 95);
+    strncpy(g_pendingEp, g_tiVal[0], 95);
+    if (!g_pendingEp[0]) log_app("v187: endpoint empty -> will prompt player\n");
     g_pendingEnter = 45;
     { char pb[160]; snprintf(pb,sizeof(pb),"v67: enter world scheduled in 45 frames (ep='%s')\n", g_pendingEp); log_app(pb); }
 }
@@ -2365,7 +2465,7 @@ static void poll_click(void)
 }
 
 
-/* ================= v43: NOJ drawer (SFS Pro route) ================= */
+/* ================= v43: NOJ drawer (参考实现路线) ================= */
 static void* g_nojCls2=NULL, *g_nojType2=NULL, *g_mOpenNoj=NULL, *g_mDrawTitle2=NULL, *g_mDrawText3=NULL, *g_mDrawFullBtn=NULL;
 static void* (*g_mgp2)(void*, uint32_t)=NULL;
 static void* (*g_cfit)(void*)=NULL;
@@ -2394,7 +2494,7 @@ static void noj_draw_all(void* panel){
     log_app("v43: drawing panel content...\n");
     s1 = g_sNew ? g_sNew("Multiplayer SFS") : NULL;
     if(g_mDrawTitle2 && s1){ void* p[1]={s1}; void* r=g_ri(g_mDrawTitle2,panel,p,&e); snprintf(b,sizeof(b),"v43: DrawTitle ret=%p exc=%p\n",r,e); log_app(b); e=NULL; }
-    s1 = g_sNew ? g_sNew("Server: 192.168.1.5   Client V1.4") : NULL;
+    { char srb[96]; snprintf(srb,sizeof(srb),"Server: %s   Client V1.4", g_tiVal[0][0] ? g_tiVal[0] : "-"); s1 = g_sNew ? g_sNew(srb) : NULL; }
     if(g_mDrawText3 && s1){ void* p[2]={&idx,s1}; void* r=g_ri(g_mDrawText3,panel,p,&e); snprintf(b,sizeof(b),"v43: DrawText ret=%p exc=%p\n",r,e); log_app(b); e=NULL; }
     s1 = g_sNew ? g_sNew("Join Server") : NULL;
     if(g_mDrawFullBtn && s1){ void* p[4]={&idx,s1,NULL,&one}; void* r=g_ri(g_mDrawFullBtn,panel,p,&e); snprintf(b,sizeof(b),"v43: DrawFullButton ret=%p exc=%p\n",r,e); log_app(b); e=NULL; }
@@ -2481,7 +2581,7 @@ static void probe_now_check(void){
  * 它就是世界卡片「开始游戏」背后的成品链路（读 Saving/Worlds/<名> 的存档 + 星系）。
  */
 /* ---- v97: 存档根目录动态探测 -------------------------------------------------
- * 实测（FileLocations.cs:139-166）：Android 11+ 上游戏把整个 Saving 目录迁到了
+ * 实测（FileLocations）：Android 11+ 上游戏把整个 Saving 目录迁到了
  *   /sdcard/Android/media/<pkg>/Saving     <-- 现在真正生效的位置
  * 老路径 /sdcard/Android/data/<pkg>/files/Saving 在迁移后就不存在了。
  * 这里两个都试，日志打出最终选中的那个（v97: saveRoot=...），以后不管游戏怎么迁都不会再错。
@@ -2521,7 +2621,7 @@ static const char* pick_world_name(char* out, int cap){
 }
 
 /* ---- v97: 造一个临时沙盒世界 -------------------------------------------------
- * 依据 WorldReference.cs:42-61 的目录布局 + 实测 WorldSettings.txt 的真实 JSON：
+ * 依据 WorldReference 的目录布局 + 实测 WorldSettings.txt 的真实 JSON：
  *   {"solarSystem":{"name":""},"mode":{"mode":0,"allowQuicksaves":true},
  *    "difficulty":{"difficulty":0},"playtime":{"lastPlayedTime_Ticks":<ticks>,"totalPlayTime_Seconds":0.0},
  *    "cheats":{...全 false}}
@@ -2610,7 +2710,7 @@ static int enter_world_official(void){
  * 生成方式：手工填一个 RocketSave，再调游戏自己的
  *   SFS.World.WQPAXLGGCOAUZEOA.LoadRocket(RocketSave, out bool)   RVA 0x18F31D8
  * 让游戏自己建零件/关节/分级，避免我们手工拼 Part 组件。
- * 偏移依据 dump.cs: RocketSave 0x10/0x18/0x20/0x24/0x28/0x2C/0x30/0x38/0x40/0x48、
+ * 偏移依据 dump: RocketSave 0x10/0x18/0x20/0x24/0x28/0x2C/0x30/0x38/0x40/0x48、
  * PartSave 0x10..0x48、JointSave 0x10/0x14、StageSave 0x10/0x18、LocationData 0x10/0x18/0x28。
  */
 static void* g_spawnerCls=NULL, *g_mLoadRocket=NULL;
@@ -3009,7 +3109,7 @@ static void rr_bind_rb(void* rb){
     g_mRbGetPos = g_gm(cls,"get_position",0);
     g_mRbSetPos = g_gm(cls,"set_position",1);
     /* v113: 这一版 Unity 把 Rigidbody2D.set_velocity 改名成了 set_linearVelocity
-     * （dump.cs:584133 set_linearVelocity(Vector2)），老的 set_velocity 在 2D 类上不存在，
+     * ），老的 set_velocity 在 2D 类上不存在，
      * 所以一直绑到 NULL —— 速度写不进去，远端火箭只会瞬移不会"飞"。
      * 先试新名，再回退旧名。 */
     g_mRbSetVel = g_gm(cls,"set_linearVelocity",1);
@@ -3130,8 +3230,8 @@ static void rr_sync_pose(int i){
     /* v127: 不再调用 set_simulated(false)。
      * bug-hunter 证据（logcat 三次 NullReference at Physics.set_PhysicsMode ← Obs<PhysicsMode> ← Start，
      * 均紧随 REMOTE CREATE）：SetLocationAndState(...,true) 之后再把 rb2d.simulated 关掉，会让
-     * Physics.PhysicsMode 的 getter 回 false，而 trajectory 已经被置 null（Physics.cs:75），
-     * 随后 set_PhysicsMode / trajectory.CheckEncounters（Physics.cs:50/194）就炸。
+     * Physics.PhysicsMode 的 getter 回 false，而 trajectory 已经被置 null（Physics），
+     * 随后 set_PhysicsMode / trajectory.CheckEncounters（Physics）就炸。
      * 位置和速度我们每帧自己写，本来就不需要关物理。 */
     (void)g_mRbSetSim; (void)g_skipSimOff;
     if(g_mRbSetPos && g_snap){ float p[2]; p[0]=(float)ix; p[1]=(float)iy; void* a[1]; a[0]=p; g_ri(g_mRbSetPos,rb,a,&e); }
@@ -3213,7 +3313,7 @@ static void rr_check_alive(void){
 }
 
 /* ---- v97: 把服务器快照里的世界时间写进游戏 -----------------------------------
- * 对应 GameManager / WorldTime（dump.cs: SFS.World.WorldTime）的 worldTime 字段。
+ * 对应 GameManager / WorldTime的 worldTime 字段。
  * 类名混淆，用「类型名里含 WorldTime 且字段名叫 worldTime」来定位，找不到就跳过（不致命）。 */
 static void* g_wtMainInst = NULL;
 static void* g_wtMainField = NULL;
@@ -3230,7 +3330,7 @@ static int   (*g_fgo)(void*) = NULL;
 static int world_time_resolve(void){
     if (g_wtResolved) return g_wtCls ? 1 : 0;
     g_wtResolved = 1;
-    /* 反编译源码 D:\sfs-tools\ref\PCSFS\SFS.World\WorldTime.cs 里类型是 SFS.World.WorldTime，
+    /* 反编译源码 游戏内 SFS.World.WorldTime 里类型是 SFS.World.WorldTime，
        混淆后的类名未知 —— 这里用「静态字段 main + 实例字段 worldTime」两个特征去全类扫一遍。 */
     void* img = g_cachedImg;
     if (!img || !g_imgClassCount || !g_imgClassGet || !g_cgfn) { log_app("v97: wt: no image scan plumbing\n"); return 0; }
@@ -3250,9 +3350,9 @@ static int world_time_resolve(void){
     return 0;
 }
 
-/* v119: PlayerController 在混淆包里**名字被改了**（dump.cs 里搜 'PlayerController' 零命中），
+/* v119: PlayerController 在混淆包里**名字被改了**（dump 里搜 'PlayerController' 零命中），
  * 只能按结构特征扫描：同时具备 静态 main + 实例 player + 实例 hasControl 的类即它是。
- * 权威源码 D:/sfs-tools/ref/PCSFS/SFS.World/PlayerController.cs:32-36
+ * 权威源码 游戏内 SFS.World.PlayerController
  *   public static PlayerController main;  public Player_Local player;  public Bool_Local hasControl; */
 static int player_controller_resolve(void){
     if(g_pcCls) return 1;
@@ -3371,10 +3471,16 @@ static void hook_update(void* self){
         if(g7){ void* a7=g_ri(g_mGoActive, g7, NULL, &e7);
             int open = (a7 && !e7) ? (int)*(unsigned char*)((char*)a7+0x10) : 0;
             if(g_tiWasOpen && !open){
-                const char* ep = g_tiVal[0][0] ? g_tiVal[0] : "192.168.1.5:9806";
-                char cb[128]; snprintf(cb,sizeof(cb),"v55: dialog closed -> connect '%s'\n", ep); log_app(cb);
-                if (read_mode() == 20) { log_app("v64: dialog closed -> join + enter world (mode 20)\n"); connect_and_enter_world(); }
-                else { ux_connect_started(); mp_net_connect(ep); }
+                const char* ep = g_tiVal[0];
+                if (!ep[0]) {
+                    /* v187: 玩家没填地址 —— 不连、不进世界，提示回去填 */
+                    log_app("v187: dialog closed without endpoint -> prompt player\n");
+                    g_promptEp = 1;
+                } else {
+                    char cb[128]; snprintf(cb,sizeof(cb),"v55: dialog closed -> connect '%s'\n", ep); log_app(cb);
+                    if (read_mode() == 20) { log_app("v64: dialog closed -> join + enter world (mode 20)\n"); connect_and_enter_world(); }
+                    else { ux_connect_started(); mp_net_connect(ep); }
+                }
             }
             g_dialogOpen = open;
             if (open != g_tiWasOpen) { char db[120]; snprintf(db,sizeof(db),"v64: dialog open=%d (was %d)\n", open, g_tiWasOpen); log_app(db); }
@@ -3516,12 +3622,12 @@ static void hook_update(void* self){
 }
 
 /* ================= v30: hand the callback to the game's own button factory =================
- * Evidence (dump.cs:21261-21362): class NOJZIZCFSEXSUEEX : MonoBehaviour, fields menuHolder 0x20,
+ * Evidence : class NOJZIZCFSEXSUEEX : MonoBehaviour, fields menuHolder 0x20,
  * fullButtonPrefab 0x90, buttonPrefab 0x88, List<...> 0x98; methods DrawFullButton(int,string,Action,bool)
  * RVA 0x18DDCF8, DrawButton 0x18DD1D0, DrawTitle 0x18DD5D4, DrawText 0x18DDC08, Open 0x18DD724,
  * Close 0x18DC824.  PC mods reach the same class through SFS.UI.ModGUI (absent on mobile: 0 hits).
  * The Action argument must be faked: il2cpp_object_new(System.Action) + method_ptr/invoke_impl
- * set to a native trampoline (same trick as the SFS-Pro seller report, section 2.6 "native trampoline").
+ * set to a native trampoline (same trick as the 另一实现的公开报告中提到的 native trampoline).
  */
 static volatile int g_tramp_hits = 0;
 __attribute__((noinline, used)) static void action_trampoline(void* a, void* b, void* c, void* d){
@@ -3774,7 +3880,7 @@ static void install_overlay(JNIEnv* env){
 }
 
 JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeInit(JNIEnv* env, jclass cls, jobject act){
-    log_app("v29: nativeInit called\n");
+    log_app("sfsmp 2.0.1.0: nativeInit called\n");
     if (act) {
         jclass ac = (*env)->GetObjectClass(env, act);
         if (ac) {
@@ -3800,6 +3906,7 @@ JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeInit(JNIEnv* env, jcla
 
 JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeTick(JNIEnv* env, jclass cls){
     g_ticks++;
+    if (g_promptEp) { g_promptEp = 0; set_label(env, "请先填写服务器地址（IP:端口），再点连接"); }
     if (g_ticks == 1) {
         if (g_dataDir[0]) {
             mkdir(g_dataDir, 0770);
@@ -3881,17 +3988,35 @@ static void* worker(void* arg){
       if (g_ticks < 1) { log_app("v147: no ticker, abort\n"); return NULL; } }
     /* v145: ticker 在 onCreate 就跑起来了（1 秒一次），但 il2cpp 要等主菜单才好（实测 10–20 s）。
        光等 tick 不够 —— 必须真等够时间，否则 dg() 在 libil2cpp 内部 SIGSEGV（worker+840）。 */
-    log_app("v146: waiting for unity (30s)\n");
+    log_app("v146: waiting for unity\n");
     /* v150: 等待时长改为可调（sfsmp-wait.txt，秒），用来摸清「最早多久能安全进 il2cpp」。
        目标：比主菜单出现更早就绪，这样克隆能跟菜单同一帧完成，用户看不到「先菜单后按钮」。 */
-    { int secs = 2; const char* wp = sfsmp_dp("sfsmp-wait.txt");
+    /* v151: 默认改回 20 秒。v150 为了测「最早多久能进 il2cpp」把默认临时设成 2 秒，
+     * 结果留在了发布路径里 —— 表现就是「nativeInit 成功、约 3 秒后 SIGSEGV、addr=0x135」，
+     * 崩在 il2cpp_domain_get() 内部（Unity 还没初始化完）。设备上若有 sfsmp-wait.txt 可覆盖。 */
+    { int secs = 20; const char* wp = sfsmp_dp("sfsmp-wait.txt");
       int fd = wp ? open(wp, O_RDONLY) : -1;
       if (fd >= 0) { char wb[16] = {0}; int n = (int)read(fd, wb, 15); close(fd);
                      if (n > 0) { int v = atoi(wb); if (v >= 1 && v <= 60) secs = v; } }
       { char wl[80]; snprintf(wl, sizeof(wl), "v150: wait=%ds\n", secs); log_app(wl); }
       sleep(secs); }
     log_app("v146: entering il2cpp\n");
-    void* h = dlopen("libil2cpp.so", RTLD_NOW);
+    /* v153（关键修复）：必须用 RTLD_NOLOAD 拿「Unity 已经加载好」的那一份 libil2cpp。
+     * 之前直接 dlopen("libil2cpp.so", RTLD_NOW) 会在 Unity 还没加载它时自己加载**第二份**，
+     * 这份的全局状态全是 0（s_domain = NULL），任何 il2cpp_* 调用都会在
+     *   il2cpp_domain_get → ... → ldrh [x0+0x135] with x0=NULL
+     * 崩掉，地址正好是 0x135 —— 与两台设备上的崩溃现场完全吻合。
+     * 现在改成轮询「已加载」状态，最多等 90 秒，等不到就安静退出（不崩）。 */
+    void* h = NULL;
+    { int w = 0;
+      while (w < 180) {
+        h = dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD);
+        if (h) break;
+        usleep(500000);
+        w++;
+      }
+      { char wb[96]; snprintf(wb, sizeof(wb), "v153: il2cpp loaded=%s after %dms\n", h ? "yes" : "no", w * 500); log_app(wb); }
+    }
     if (!h) { log_app("v29: no il2cpp\n"); return NULL; }
     fn0 dg=(fn0)dlsym(h,"il2cpp_domain_get");
     fn_ta ta=(fn_ta)dlsym(h,"il2cpp_thread_attach");
@@ -3912,6 +4037,10 @@ static void* worker(void* arg){
     fn_mp mp=(fn_mp)dlsym(dlopen("libc.so",RTLD_NOW),"mprotect");
     if(!dg||!ta||!ao||!gi||!cf||!gm||!cgfn||!fgt||!tgoc||!tgo||!cgt||!fgo||!ri||!alg||!unbox||!schars||!mp){ log_app("v29: missing syms\n"); return NULL; }
     g_ri=ri; g_alg=alg; g_unbox=unbox; g_schars=schars;
+    { char sb[220];
+      snprintf(sb, sizeof(sb), "v152: h=%p dg=%p ta=%p ao=%p ri=%p\n",
+               h, (void*)dg, (void*)ta, (void*)ao, (void*)ri);
+      log_app(sb); }
     /* v138: 一次到位，不做探针（探针会在 il2cpp 持锁时 longjmp，把 Unity 初始化线程锁死） */
     void* d = dg();
     { char db[110]; snprintf(db, sizeof(db), "v138: domain=%p\n", d); log_app(db); }
@@ -4209,14 +4338,14 @@ static void* worker(void* arg){
     g_scDataCls = cf(img,"SFS.World","SpaceCenterData");
     if(g_scDataCls) g_mGetLaunchPad = gm(g_scDataCls,"get_LaunchPadLocation",0);
     /* v118: 唯一权威"我是谁" —— SFS.World.PlayerController（未混淆名，静态 main + 实例 player）
-     * 权威源码 D:/sfs-tools/ref/PCSFS/SFS.World/PlayerController.cs:32-34
+     * 权威源码 游戏内 SFS.World.PlayerController
      * Player_Local : Obs_Destroyable<Player> : Obs<Player>，Obs 里 private T value 在 +0x10。 */
     player_controller_resolve();
     { char vb[300]; snprintf(vb,sizeof(vb),"v100: wvCls=%p wvMain=%p setView=%p baseCls=%p baseType=%p offPL=%d plCls=%p offSC=%d scCls=%p getPad=%p\n",
         g_worldViewCls,g_worldViewMainField,g_mSetViewLocation,g_baseCls,g_typeBase,(int)g_offPlanetLoader,g_plCls,(int)g_offSpaceCenter,g_scDataCls,g_mGetLaunchPad); log_app(vb); }
             g_mLoadWorldScene = gm(g_sceneLoaderCls,"LoadWorldScene",1);
             if(!g_mLoadWorldScene) g_mLoadWorldScene = gm(g_sceneLoaderCls,"LoadWorldScene",0);
-            /* v173: 航天大楼 —— SceneLoader.LoadHubScene(bool,bool,bool,bool) RVA 0x16EE1CC (dump.cs:29000) */
+            /* v173: 航天大楼 —— SceneLoader.LoadHubScene(bool,bool,bool,bool) RVA 0x16EE1CC  */
             g_mLoadHubScene = gm(g_sceneLoaderCls,"LoadHubScene",4);
             snprintf(b,sizeof(b),"v173: LoadHubScene=%p LoadWorldScene=%p\n", g_mLoadHubScene, g_mLoadWorldScene); log_app(b);
             snprintf(b,sizeof(b),"v64: sceneLoader cls=%p type=%p LoadWorldScene=%p\n",
@@ -4315,6 +4444,16 @@ static void* worker(void* arg){
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* res){
     (void)res;
     g_vm = vm;
+    /* v155：**默认不装**崩溃信号处理器。
+     * 原因（v125 源码对比得出）：老版本（v125，已验证能渲染）根本没有安装任何 signal handler，
+     * 而 ART 的 libsigchain 把 SIGSEGV 用于「隐式空指针检查」——il2cpp 内部遇到未初始化状态时
+     * 是让它安全地抛成托管异常再被 catch，而不是崩进程。
+     * 我们把 SIGSEGV/SIGBUS 抢过来 + SA_RESETHAND 后 SIG_DFL，就把这条可恢复路径变成了必死：
+     * 崩溃日志里 addr=0x135（ldrh [NULL+0x135]）正是这种隐式空检查，属于「本该被吞掉的故障」。
+     * 需要抓崩溃栈时再定义 SFSMP_CRASH_HANDLER 编译。 */
+#ifdef SFSMP_CRASH_HANDLER
+    sfsmp_install_crash_handler();
+#endif
     log_app("v29: JNI_OnLoad\n");
     pthread_t t;
     if(pthread_create(&t,NULL,worker,NULL)==0) pthread_detach(t);

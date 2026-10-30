@@ -2,13 +2,16 @@
 package com.sfsmp.patcher;
 
 import android.content.Context;
+import android.os.Build;
 
 import com.android.apksig.ApkSigner;
 
 import java.io.*;
-import java.security.KeyStore;
+import java.security.KeyFactory;
 import java.security.PrivateKey;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -23,15 +26,16 @@ import java.util.zip.ZipOutputStream;
  * 只加东西、不替换游戏逻辑：
  *   1) AndroidManifest.xml：launcher 的 android:name 指到 com.sfsmp.patch.HookActivity；versionCode +1
  *   2) classes{N}.dex：Bridge / Ticker / HookActivity（我们自己的类）
- *   3) lib/arm64-v8a/libsfsmp.so：联机 mod 本体
- * 其余条目按原有压缩方式原样搬运（resources.arsc 必须保持 STORED + 4 字节对齐）。
+ *   3) lib/<设备ABI>/libsfsmp.so：联机 mod 本体（只放当前设备那一个 ABI）
+ * 其余条目：raw copy 原样搬运压缩流（不解压不重压），resources.arsc 保持 STORED + 4 字节对齐。
  */
 public final class ApkPatcher {
 
     public interface Log { void line(String s); }
 
     public static final String HOOK_ACTIVITY = "com.sfsmp.patch.HookActivity";
-    public static final String LIB_ENTRY = "lib/arm64-v8a/libsfsmp.so";
+    public static final String OLD_PKG = "com.StefMorojna.SpaceflightSimulator";
+    public static final String COEXIST_PKG = "com.sfsmp.sfs";
 
     private static final Pattern DEX = Pattern.compile("^classes(\\d*)\\.dex$");
 
@@ -43,21 +47,46 @@ public final class ApkPatcher {
         return bo.toByteArray();
     }
 
-    public static final String OLD_PKG = "com.StefMorojna.SpaceflightSimulator";
-    /** 共存版包名（短、独立、和官方不冲突）。 */
-    public static final String COEXIST_PKG = "com.sfsmp.sfs";
+    /** 当前设备主 ABI（只支持 ARM 两种；官方包本身也只有这两个）。 */
+    public static String deviceAbi() {
+        String a = Build.SUPPORTED_ABIS.length > 0 ? Build.SUPPORTED_ABIS[0] : "";
+        if ("arm64-v8a".equals(a) || "armeabi-v7a".equals(a)) return a;
+        return a;
+    }
 
-    /** 生成未签名补丁包（不换包名），返回新 versionCode。 */
+    public static boolean abiSupported(String abi) {
+        return "arm64-v8a".equals(abi) || "armeabi-v7a".equals(abi);
+    }
+
+    /** 拆分发包：assets/abi.txt 写明本安装器只带哪个架构的注入库；both 版没有这个文件，返回 null。 */
+    public static String installerAbi(Context ctx) {
+        try {
+            String s = new String(readAsset(ctx, "abi.txt"), "UTF-8").trim();
+            if (abiSupported(s)) return s;
+        } catch (Throwable ignored) { }
+        return null;
+    }
+
+    private static String soAssetFor(String abi) {
+        return "arm64-v8a".equals(abi) ? "libsfsmp-arm64.so" : "libsfsmp-armv7.so";
+    }
+
     public static int buildUnsigned(Context ctx, File officialApk, File out, String oldLauncher, int newVersionCode, Log log) throws Exception {
         return buildUnsigned(ctx, officialApk, out, oldLauncher, newVersionCode, null, log);
     }
 
-    /** 生成未签名补丁包；newPackage 非空时顺便改包名（共存模式），返回新 versionCode。 */
     public static int buildUnsigned(Context ctx, File officialApk, File out, String oldLauncher, int newVersionCode, String newPackage, Log log) throws Exception {
         if (!officialApk.exists()) throw new IOException("找不到官方 APK: " + officialApk);
+        String abi = deviceAbi();
+        if (!abiSupported(abi)) throw new IOException("不支持的设备架构: " + abi + "（官方包不含该架构的原生库，装了也起不来）");
+        String want = installerAbi(ctx);
+        if (want != null && !want.equals(abi))
+            throw new IOException("这个安装器是 " + want + " 版，本机是 " + abi + "，请下载对应架构的安装器");
         byte[] hookDex = readAsset(ctx, "hook.dex");
-        byte[] so = readAsset(ctx, "libsfsmp.so");
-        log.line("内置资源: hook.dex " + hookDex.length + " B, libsfsmp.so " + so.length + " B");
+        byte[] so = readAsset(ctx, soAssetFor(abi));
+        String libEntry = "lib/" + abi + "/libsfsmp.so";
+        log.line("设备 ABI: " + abi + " → 只打这一个包（丢弃其它指令集）");
+        log.line("内置资源: hook.dex " + hookDex.length + " B, " + soAssetFor(abi) + " " + so.length + " B");
 
         ZipFile zf = new ZipFile(officialApk);
         try {
@@ -84,58 +113,72 @@ public final class ApkPatcher {
             String newDex = "classes" + (maxDex + 1) + ".dex";
             log.line("新增 dex: " + newDex + " (已有 classes.dex..classes" + maxDex + ".dex)");
 
+            Map<String, byte[]> replace = new LinkedHashMap<String, byte[]>();
+            replace.put("AndroidManifest.xml", patched);
+            if (newPackage != null) {
+                ZipEntry ae = zf.getEntry("resources.arsc");
+                if (ae == null) throw new IOException("官方包里没有 resources.arsc");
+                byte[] ar = readAll(zf.getInputStream(ae));
+                if (!Arsc.renamePackage(ar, newPackage)) throw new IOException("resources.arsc 改包名失败");
+                replace.put("resources.arsc", ar);
+                log.line("arsc: 包名 -> " + Arsc.readPackage(ar));
+            }
+
+            final String keepPrefix = "lib/" + abi + "/";
+            ZipRaw.Skip skip = new ZipRaw.Skip() {
+                public boolean skip(String name) {
+                    if (name.equals("AndroidManifest.xml")) return true;
+                    if (name.startsWith("lib/")) {
+                        if (!name.startsWith(keepPrefix)) return true;          /* 其它指令集整个丢掉 */
+                        if (name.endsWith("/libsfsmp.so")) return true;        /* 旧的我们自己的库，等会儿重写 */
+                    }
+                    return false;
+                }
+            };
+            List<ZipRaw.Add> adds = new ArrayList<ZipRaw.Add>();
+            adds.add(new ZipRaw.Add(newDex, hookDex, false));
+            adds.add(new ZipRaw.Add(libEntry, so, false));
+
             File parent = out.getParentFile();
             if (parent != null) parent.mkdirs();
-            CountingOutputStream cos = new CountingOutputStream(new BufferedOutputStream(new FileOutputStream(out), 1 << 16));
-            ZipOutputStream zos = new ZipOutputStream(cos);
-            zos.setLevel(6);
+            long t0 = System.currentTimeMillis();
             try {
-                en = zf.entries();
-                while (en.hasMoreElements()) {
-                    ZipEntry e = en.nextElement();
-                    String name = e.getName();
-                    if (name.equals("AndroidManifest.xml")) continue;
-                    if (name.equals(newDex)) continue;
-                    if (name.equals(LIB_ENTRY)) continue;
-                    if (e.isDirectory()) { copyDir(zos, cos, name); continue; }
-                    if (name.equals("resources.arsc") && newPackage != null) {
-                        byte[] ar;
-                        InputStream ain = zf.getInputStream(e);
-                        try { ar = readAll(ain); } finally { ain.close(); }
-                        if (!Arsc.renamePackage(ar, newPackage)) throw new IOException("resources.arsc 改包名失败");
-                        log.line("arsc: 包名 -> " + Arsc.readPackage(ar));
-                        writeBytes(zos, cos, name, ar, true);   /* arsc 必须 STORED */
-                        continue;
-                    }
-                    InputStream in = zf.getInputStream(e);
-                    try { copyEntry(zos, cos, name, in, e.getMethod() == ZipEntry.STORED, e.getTime()); }
-                    finally { in.close(); }
-                }
-                writeBytes(zos, cos, "AndroidManifest.xml", patched, false);
-                writeBytes(zos, cos, newDex, hookDex, false);
-                writeBytes(zos, cos, LIB_ENTRY, so, false);
-            } finally { zos.close(); }
+                ZipRaw.build(officialApk, out, replace, skip, adds, new ZipRaw.Log() { public void line(String s) { log.line(s); } });
+                log.line("raw copy 用时 " + (System.currentTimeMillis() - t0) + " ms");
+            } catch (Exception zre) {
+                log.line("raw copy 失败(" + zre + ")，回退到重压模式（会很慢）");
+                buildLegacy(zf, out, replace, newDex, hookDex, libEntry, so, skip, log);
+            }
             return newVersionCode;
         } finally { zf.close(); }
     }
 
-    /** 读取内置资源；assets 里是 XOR 密文（见 Pack），这里解密。 */
-    private static byte[] readAsset(Context ctx, String name) throws IOException {
+    /** 旧路径：逐条解压再压缩（慢），仅在 raw copy 失败时兜底。 */
+    private static void buildLegacy(ZipFile zf, File out, Map<String, byte[]> replace, String newDex,
+                                    byte[] hookDex, String libEntry, byte[] so, ZipRaw.Skip skip, Log log) throws IOException {
+        CountingOutputStream cos = new CountingOutputStream(new BufferedOutputStream(new FileOutputStream(out), 1 << 16));
+        ZipOutputStream zos = new ZipOutputStream(cos);
+        zos.setLevel(6);
         try {
-            return Pack.readPacked(ctx.getAssets().open(name));
-        } catch (IOException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new IOException("解包失败 " + name + ": " + e, e);
-        }
+            Enumeration<? extends ZipEntry> en = zf.entries();
+            while (en.hasMoreElements()) {
+                ZipEntry e = en.nextElement();
+                String name = e.getName();
+                if (replace.containsKey(name) || skip.skip(name)) continue;
+                InputStream in = zf.getInputStream(e);
+                try { copyEntry(zos, cos, name, in, e.getMethod() == ZipEntry.STORED, e.getTime()); }
+                finally { in.close(); }
+            }
+            for (Map.Entry<String, byte[]> kv : replace.entrySet()) writeBytes(zos, cos, kv.getKey(), kv.getValue(), false);
+            writeBytes(zos, cos, newDex, hookDex, false);
+            writeBytes(zos, cos, libEntry, so, false);
+        } finally { zos.close(); }
     }
 
-    private static void copyDir(ZipOutputStream zos, CountingOutputStream cos, String name) throws IOException {
-        ZipEntry e = new ZipEntry(name);
-        e.setMethod(ZipEntry.STORED);
-        e.setSize(0); e.setCompressedSize(0); e.setCrc(0);
-        zos.putNextEntry(e);
-        zos.closeEntry();
+    /** assets 里是明文（不加壳、不加密）。 */
+    private static byte[] readAsset(Context ctx, String name) throws IOException {
+        InputStream in = ctx.getAssets().open(name);
+        try { return readAll(in); } finally { in.close(); }
     }
 
     private static void copyEntry(ZipOutputStream zos, CountingOutputStream cos, String name, InputStream in, boolean stored, long time) throws IOException {
@@ -150,11 +193,9 @@ public final class ApkPatcher {
             zos.closeEntry();
             return;
         }
-        byte[] data = readAll(in);
-        writeBytes(zos, cos, name, data, true);
+        writeBytes(zos, cos, name, readAll(in), true);
     }
 
-    /** 写一个 STORED 条目，并按 4 字节对齐补 extra（resources.arsc 必须是 STORED+对齐）。 */
     private static void writeBytes(ZipOutputStream zos, CountingOutputStream cos, String name, byte[] data, boolean stored) throws IOException {
         ZipEntry e = new ZipEntry(name);
         if (!stored) {
@@ -176,37 +217,35 @@ public final class ApkPatcher {
         zos.closeEntry();
     }
 
-    /** 计算 4 字节对齐所需的 extra 字段（含 4 字节头）。 */
     private static byte[] padding(long headerStart) {
-        long base = headerStart + 30; // 不含 extra 的本地头
+        long base = headerStart + 30;
         int pad = (int) ((4 - (base % 4)) % 4);
         if (pad == 0) return new byte[0];
         if (pad < 4) pad += 4;
         byte[] ex = new byte[pad];
-        ex[0] = (byte) 0x35; ex[1] = (byte) 0xD9;
-        ex[2] = (byte) (pad - 4); ex[3] = 0;
+        ex[0] = (byte) 0x35; ex[1] = (byte) 0xD9; ex[2] = (byte) (pad - 4); ex[3] = 0;
         return ex;
     }
 
-    /** 用内置 keystore 重签。 */
+    /** 用内置 keystore 重签（v2；minSdk 26 不需要 v1）。 */
     public static void sign(Context ctx, File in, File out, Log log) throws Exception {
         byte[] keyDer = readAsset(ctx, "sfsmp.key");
         byte[] crtDer = readAsset(ctx, "sfsmp.crt");
-        PrivateKey key = java.security.KeyFactory.getInstance("RSA")
-                .generatePrivate(new java.security.spec.PKCS8EncodedKeySpec(keyDer));
-        X509Certificate cert = (X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
-                .generateCertificate(new java.io.ByteArrayInputStream(crtDer));
+        PrivateKey key = KeyFactory.getInstance("RSA").generatePrivate(new PKCS8EncodedKeySpec(keyDer));
+        X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X.509")
+                .generateCertificate(new ByteArrayInputStream(crtDer));
         ApkSigner.SignerConfig sc = new ApkSigner.SignerConfig.Builder("SFSMP", key, Collections.singletonList(cert)).build();
         log.line("签名中…");
+        long t0 = System.currentTimeMillis();
         new ApkSigner.Builder(Collections.singletonList(sc))
                 .setInputApk(in)
                 .setOutputApk(out)
-                .setV1SigningEnabled(true)
+                .setV1SigningEnabled(false)
                 .setV2SigningEnabled(true)
                 .setMinSdkVersion(26)
                 .build()
                 .sign();
-        log.line("签名完成: " + out.length() + " B");
+        log.line("签名完成: " + out.length() + " B（" + (System.currentTimeMillis() - t0) + " ms）");
     }
 
     public static final class CountingOutputStream extends FilterOutputStream {

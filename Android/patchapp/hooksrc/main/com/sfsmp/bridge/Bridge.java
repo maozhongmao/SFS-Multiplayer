@@ -8,6 +8,7 @@ import android.view.View;
  * native 侧（v64.c）硬依赖这个类：
  *   GetStaticFieldID(g_bridge, "INSTANCE", "Lcom/sfsmp/bridge/Bridge;")
  *   Java_com_sfsmp_bridge_Bridge_nativeInit / _nativeTick / _nativeOnClick
+ * v154：去掉 JavaLog 调用，恢复最小行为。
  */
 public class Bridge implements View.OnClickListener {
     private static final Bridge INSTANCE = new Bridge();
