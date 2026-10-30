@@ -8,16 +8,16 @@
 ```
 Plugin/
 ├── stats/                    在线时长统计
-│   ├── plugin_stats.js           源码
-│   └── plugin_stats.qbc          编译产物
+│   ├── plugin_stats.js       源码
+│   └── plugin_stats.qbc      编译产物
 ├── chat/                     聊天管理
-│   ├── plugin_chat.js
-│   └── plugin_chat.qbc
+│   ├── plugin_chat.js        源码
+│   └── plugin_chat.qbc       编译产物
 ├── admin/                    管理命令集
-│   ├── plugin_admin.js
-│   └── plugin_admin.qbc
+│   ├── plugin_admin.js       源码
+│   └── plugin_admin.qbc      编译产物
 ├── aaaexample/               官方分类示例
-│   └── 01_log.js … 05_rocket.js
+│   └── 01_log.js … 05_rocket.js   示例文件
 ├── webui.js                  网页看板（Node 脚本，内嵌插件 + HTML）
 └── README.md                 本文件
 ```
