@@ -133,6 +133,7 @@ std::vector<std::uint8_t> EncodeHello(const JoinRequest& request) {
     AppendString(out, request.solar_system_name);
     AppendU32(out, static_cast<std::uint32_t>(request.resume_player_id));
     AppendString(out, request.resume_token);
+    out.push_back(request.platform);
     return out;
 }
 
@@ -162,6 +163,8 @@ JoinRequest DecodeHello(const std::vector<std::uint8_t>& payload) {
     request.solar_system_name = cursor.String();
     request.resume_player_id = static_cast<std::int32_t>(cursor.U32());
     request.resume_token = cursor.String();
+    // 平台字节可选：老客户端不发，按 0（PC/未上报）处理。
+    try { request.platform = cursor.U8(); } catch (...) { request.platform = 0; }
     RequireNoTrailing(cursor);
     return request;
 }

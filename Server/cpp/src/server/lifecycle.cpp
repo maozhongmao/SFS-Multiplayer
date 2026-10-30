@@ -33,6 +33,7 @@ Server::Server(std::uint16_t port, std::int32_t max_players, std::string state_p
 bool Server::start() {
     if (!kcp_.init(port_)) { std::perror("kcp init"); return false; }
 
+    SFS_LOGI(Cat::Net, "[cpp-server] SFS-Multiplayer 2.0.1.0");
     SFS_LOGI(Cat::Net, "[cpp-server] listening on KCP (UDP) port %u, max_players=%d",
              static_cast<unsigned>(port_), max_players_);
     // 加入准入的生效值（对齐 C# 启动时会打印的 server.yml 相关字段）。

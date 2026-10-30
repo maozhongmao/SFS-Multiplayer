@@ -330,18 +330,22 @@ bool Server::try_kick(const std::string& target, std::string* out_message) {
 
 std::string Server::player_list_text() {
     std::string out;
+    int n_mobile = 0, n_pc = 0;
     for (auto& [fd, c] : conns_) {
         (void)fd;
         if (!c.handshaked || c.player_id < 0) continue;
+        const bool mobile = (c.platform == 1);
+        if (mobile) ++n_mobile; else ++n_pc;
         const auto rit = controlled_rocket_.find(c.player_id);
         const std::int32_t controlled = rit == controlled_rocket_.end() ? -1 : rit->second;
         char buffer[256];
-        std::snprintf(buffer, sizeof(buffer), "%d: %s control=%d RTT=%.2fms",
-                      c.player_id, c.username.c_str(), controlled, c.rtt_ms);
+        std::snprintf(buffer, sizeof(buffer), "%d: %s [%s] control=%d RTT=%.2fms",
+                      c.player_id, c.username.c_str(), mobile ? "android" : "pc", controlled, c.rtt_ms);
         if (!out.empty()) out += "\n";
         out += buffer;
     }
     if (out.empty()) return "No players online.";
+    { char tail[96]; std::snprintf(tail, sizeof(tail), "\n-- android=%d pc=%d", n_mobile, n_pc); out += tail; }
     return out;
 }
 

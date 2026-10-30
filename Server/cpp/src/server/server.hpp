@@ -71,6 +71,7 @@ struct Connection {
     // P2P socket 的广告端口（客户端用 Packet_P2PEndpoint 上报；0 = 尚未广告）。
     // 撮合时用它填 offer 的 peer_port：否则对方会打到主传输 socket 上，探测有去无回。
     std::int32_t p2p_port = 0;
+    std::uint8_t platform = 0;   // 0=未上报/PC, 1=Android（Hello 尾部字节）
     // 加入被拒（对齐 C# connection.Deny(reason)）：Disconnect 帧（含原因）已经发出，
     // 连接进入"等 KCP 有机会重传后再关闭"的状态，期间不再处理任何帧。
     bool denied = false;
