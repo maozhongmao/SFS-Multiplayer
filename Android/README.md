@@ -4,28 +4,10 @@
 | 目录 | 内容 |
 |---|---|
 | `src/` | 注入库源码（`v30.c` … `v43.c`，48 个文件；当前主线 = `v43.c`，其中 mode 11 = 原生输入弹窗） |
-| `so-out/` | 编译产物 `v43.so` / `v44.so`（arm64-v8a） |
-| `apk/` | 已注入并签名的官方包 `live-aligned-debugSigned.apk`（110,298,060 B） |
 | `dump/` | 1.6.00.22 官方 IL2CPP dump（`dump.cs` 21 MB、`script.json`、`il2cpp.h`、`stringliteral.json`、`DummyDll/`） |
 | `research/native_ui/` | 5 份子 agent 研究报告 + `00_ROUTE.md` 总路线 + 反汇编小工具 |
 | `checkpoints/v44_native_textinput_ok/` | 可用存档点（含自己的 APK 副本、README、MANIFEST） |
 | `tools/` | `pack-so.ps1`（打包签名）、`scan_apk.py` |
-
-## 构建（需要 NDK，路径在本机 `D:/sfs-tools/ndk/android-ndk-r27c`）
-```bash
-CC="D:/sfs-tools/ndk/android-ndk-r27c/toolchains/llvm/prebuilt/windows-x86_64/bin/aarch64-linux-android24-clang.cmd"
-"$CC" -shared -fPIC -O2 -Wall -o "so-out/v44.so" "src/v43.c"
-powershell -NoProfile -ExecutionPolicy Bypass -File "tools/pack-so.ps1" -SoName v44
-```
-`pack-so.ps1` 会把 `so-out/<name>.so` 注入 `apk/live-aligned-debugSigned.apk` 的 `lib/arm64-v8a/libsfsmp.so` 并重签名。
-
-## 安装 / 切档（测试机 vivo V2046A `3069634870003H8`）
-```bash
-ADB="D:/HBuilderX/plugins/vnmy-adbWifiConnect/adb.exe"; S=3069634870003H8
-"$ADB" -s $S install -r --no-incremental apk/live-aligned-debugSigned.apk
-"$ADB" -s $S shell "echo 11 > /sdcard/Android/data/com.StefMorojna.SpaceflightSimulator/files/sfsmp-mode.txt"
-"$ADB" -s $S shell "am force-stop com.StefMorojna.SpaceflightSimulator; am start -n com.StefMorojna.SpaceflightSimulator/com.teamcuriosity.addons.ExtendedUnityActivity"
-```
 
 ## 档位（`sfsmp-mode.txt`）
 | mode | 行为 | 状态 |
