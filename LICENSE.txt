@@ -374,15 +374,12 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
 -------------------------------------------------------------------------
 
-附加条款 / Additional Terms（项目补充说明，非 Mozilla 原文）
+Additional Terms (Project Supplementary Notes, Not Original Mozilla Text)
 
-1. 目录分协议：本仓库 `Android/` 目录（手机端联机补丁：注入层 `libsfsmp.so`、
-   `libmain.so` 跳板、补丁安装器）不适用本 MPL 文本，而是以 GNU General Public
-   License v3.0 or later 发布，完整条款见 `Android/LICENSE`。该目录下每个源码文件
-   头部带 `SPDX-License-Identifier: GPL-3.0-or-later`。
-2. 其余目录（`Client/`、`Server/`、`Plugin/` 等）依 Mozilla Public License 2.0
-   （即本文本）发布，每个源码文件头部带 `SPDX-License-Identifier: MPL-2.0`。
-3. 本仓库不包含、也不分发 Spaceflight Simulator 的游戏本体、游戏资源或反编译代码；
-   手机端补丁只作用于用户自己设备上已经安装的正版游戏。
-4. 第 1 条属于 MPL-2.0 第 3.2 节允许的「附加条款 / 独立文件」安排：它只适用于明确
-   标注 GPL 的那个子目录，不改变本文件其余部分的效力。
+1. Directory-specific licensing: The Android/ directory of this repository (mobile multiplayer patch: injection layer libsfsmp.so, libmain.so trampoline, patch installer) is not governed by this MPL text; instead, it is released under the GNU General Public License v3.0 or later. The complete terms are in Android/LICENSE. Each source file under that directory carries SPDX-License-Identifier: GPL-3.0-or-later in its header.
+
+2. All other directories (Client/, Server/, Plugin/, etc.) are released under the Mozilla Public License 2.0 (i.e., this text), and each source file carries SPDX-License-Identifier: MPL-2.0 in its header.
+
+3. This repository does not contain or distribute the Spaceflight Simulator game itself, game assets, or decompiled code; the mobile patch only acts on the legitimate copy of the game already installed on the user's own device.
+
+4. Clause 1 constitutes an "Additional Terms / separate file" arrangement permitted by Section 3.2 of MPL-2.0: it applies only to the subdirectory explicitly marked as GPL and does not affect the validity of the remaining parts of this file.
