@@ -41,12 +41,12 @@ powershell -ExecutionPolicy Bypass -File Server/cpp/build-release.ps1 -Version 1
 #   命令行的优先级：命令行 > 环境变量 > 配置文件 > 内置默认值
 ```
 
-服务端控制台命令：`help` `status` `say` `kick` `stop` `players` 等；
+服务端控制台命令：help status say kick stop players 等；
 插件可以新增自己的命令（见 [`../Plugin/`](../Plugin/)）。
 
 ## 插件系统（QuickJS）
 
-编译期 `-DSFS_PLUGINS=1` 打开、运行期 `SFS_PLUGINS=0` 可临时关掉。
+编译期 -DSFS_PLUGINS=1 打开、运行期 SFS_PLUGINS=0 可临时关掉。
 **关闭时产物与未引入前逐字节一致**（quickjs 源码不参与构建）。
 
 ```bash
@@ -66,10 +66,7 @@ SFS_PLUGINS=1 SFS_PLUGIN_PATH=my_plugin.qbc ./sfs-server-kcp-arm --port 9806
 
 ## 文档索引
 
-- 线格式与协议：`cpp/docs/WIRE_FORMAT.md`、`cpp/src/protocol/PLUGIN_API.md`
-- 设计决策：`cpp/docs/ADR-001-kcp-transport.md`、`ADR-002-easytier-networking.md`、`ADR-003-proxy-protocol-and-commands.md`
-- 性能：`cpp/docs/PERF_COMPARISON.md`
+- 线格式与协议：cpp/docs/WIRE_FORMAT.md、cpp/src/protocol/PLUGIN_API.md
+- 设计决策：cpp/docs/ADR-001-kcp-transport.md、ADR-002-easytier-networking.md、ADR-003-proxy-protocol-and-commands.md
+- 性能：cpp/docs/PERF_COMPARISON.md
 - 插件：[`../Plugin/`](../Plugin/)
-
-> 历史遗留清理记录（2026-10-16）：删除了两个反编译产物目录（`analysis-*-lidgren/`，共 123 个 .cs）
-> 与一个误入库的编译产物（`fixed-server/SFS-Multiplayer-Server.exe`，418KB）。
