@@ -341,6 +341,7 @@ static void* g_rockCls=NULL, *g_rockType=NULL;
 /* v110: 我们自己生成的远端火箭对象表（定义在下面的 rr_* 区块）。
  * publish_local_pose 选"我自己的火箭"时必须排除它们 —— 前置声明放这里。 */
 static void* g_rrRocket[MP_RR_MAX];
+static void* g_mDestroy = NULL;
 
 extern void mp_set_local_pose(double x, double y, double vx, double vy, const char* planet, float rot);
 extern void mp_set_local_angular(float av);   /* v107 */
@@ -3532,7 +3533,20 @@ static void hook_update(void* self){
         /* v74: 收到远端火箭结构就在世界里生成它（每 20 帧扫一次，失败最多 3 次） */
         if (g_ready && !g_selfTested && strstr(g_sceneName,"World_Mobile") && f > 900){ g_selfTested = 1; rr_selftest(); }
         /* v173: 只在世界场景里生成远端火箭（航天大楼/建造蓝图里 FindObjectsOfType 会白卡帧） */
-        if (g_ready && strstr(g_sceneName,"World_Mobile") && (f % 20) == 0){ int rn = mp_rr_count(); for (int i = 0; i < rn; i++) rr_try_spawn(i); }
+        if (g_ready && strstr(g_sceneName,"World_Mobile") && (f % 20) == 0){
+            int rn = mp_rr_count();
+            for (int i = 0; i < rn; i++){
+                mp_rrocket_t* rr = mp_rr_at(i);
+                if(rr && rr->dirty && g_rrSpawned[i]){
+                    void* stale = g_rrRocket[i];
+                    if(stale && g_mDestroy){ void* args[1] = { stale }; void* ex = NULL; g_ri(g_mDestroy, NULL, args, &ex); }
+                    g_rrRocket[i] = NULL; g_rrSpawned[i] = 0; g_rrTries[i] = 0; g_rrSimOff[i] = 0;
+                    char db[112]; snprintf(db,sizeof(db),"mp: rebuild remote rocket gid=%d after structure event\n", rr->gid); log_app(db);
+                    continue; /* Defer respawn to the next interval so Destroy takes effect first. */
+                }
+                rr_try_spawn(i);
+            }
+        }
     /* v163: 每 5 秒打一次下行频率（判断"一秒一次"到底卡在哪一段） */
     if (g_ready && (f % 300) == 0){
         static int lastc = 0; int c = mp_rx_primary_count();
@@ -4059,6 +4073,7 @@ static void* worker(void* arg){
     void* objCls=cf(coreImg,"UnityEngine","Object");
     objCls_ = objCls;
     g_findMethod=objCls?gm(objCls,"FindObjectsOfType",1):NULL;
+    g_mDestroy=objCls?gm(objCls,"Destroy",1):NULL;
     if(!g_findMethod){ log_app("v29: no FindObjectsOfType\n"); return NULL; }
     g_typeObj=tgo(cgt(g_rocketCls));
     void* fName=cgfn(g_rocketCls,"rocketName");

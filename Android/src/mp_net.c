@@ -21,6 +21,7 @@
 
 #include "ikcp.h"
 #include "mp_types.h"
+#include "mp_destroy_part_wire.h"
 
 /* v129: 路径跟随运行时包名（由 v64.c 的 sfsmp_set_package 决定）。共存版换了包名也能写进自己的目录。 */
 extern const char* sfsmp_dp(const char* name);
@@ -62,12 +63,13 @@ static void bw_str(bw_t* w, const char* s){
 }
 
 /* ---------- 位读取器 ---------- */
-typedef struct { const unsigned char* buf; int nbits; int bit; } br_t;
+typedef struct { const unsigned char* buf; int nbits; int bit; int failed; } br_t;
 static unsigned long long br_bits(br_t* r, int n){
     unsigned long long v = 0;
     for(int i=0;i<n;i++){
         int byte = r->bit >> 3, off = r->bit & 7;
-        if(r->bit < r->nbits && ((r->buf[byte] >> off) & 1u)) v |= (1ull << i);
+        if(r->bit < r->nbits) { if((r->buf[byte] >> off) & 1u) v |= (1ull << i); }
+        else r->failed = 1;
         r->bit++;
     }
     return v;
@@ -176,6 +178,35 @@ static mp_rrocket_t* rr_find(int gid){
 int mp_rr_count(void){ return g_rr_n; }
 mp_rrocket_t* mp_rr_at(int i){ return (i>=0 && i<g_rr_n) ? &g_rr[i] : NULL; }
 void mp_rr_clear_dirty(int i){ if(i>=0 && i<g_rr_n) g_rr[i].dirty = 0; }
+
+int mp_rr_remove_part(int rocket_id, int part_id){
+    mp_rrocket_t* rr = rr_find(rocket_id);
+    if(!rr || part_id < 0) return 0;
+    int at = -1;
+    for(int i = 0; i < rr->nparts; ++i) if(rr->parts[i].id == part_id){ at = i; break; }
+    if(at < 0) return 0;
+    memmove(&rr->parts[at], &rr->parts[at + 1], sizeof(rr->parts[0]) * (size_t)(rr->nparts - at - 1));
+    --rr->nparts;
+    rr->has_structure = rr->nparts > 0;
+    for(int i = 0; i < rr->njoints;){
+        if(rr->joints[i].a == part_id || rr->joints[i].b == part_id){
+            memmove(&rr->joints[i], &rr->joints[i + 1], sizeof(rr->joints[0]) * (size_t)(rr->njoints - i - 1));
+            --rr->njoints;
+        } else ++i;
+    }
+    for(int i = 0; i < rr->nstages; ++i){
+        mp_rstage_t* stage = &rr->stages[i];
+        for(int j = 0; j < stage->n;){
+            if(stage->ids[j] == part_id){
+                memmove(&stage->ids[j], &stage->ids[j + 1], sizeof(stage->ids[0]) * (size_t)(stage->n - j - 1));
+                --stage->n;
+            } else ++j;
+        }
+    }
+    rr->dirty = 1;
+    return 1;
+}
+
 
 /* CreateRocket 的 RocketState 载荷（= 整棵零件树）。
  * 字段顺序以 Server/cpp/src/protocol/packets.cpp:273 RocketState::serialize 为准：
@@ -772,12 +803,13 @@ static void* mp_thread(void* arg){
                 if(n <= 0) break;
                 if(n < 4) continue;
                 int len = (int)r_u32(kb);
-                if(len + 4 > n) continue;
+                if(len < 9 || len > n - 4) continue;
                 unsigned char* f = kb + 4;
                 int kind = f[4];
-                g_last_rx_ms = mp_now_ms();
                 int payloadBits = (int)r_u32(f+9);
-                int plen = payloadBits / 8;
+                if(payloadBits < 0 || payloadBits > (len - 9) * 8) continue;
+                int plen = (payloadBits + 7) / 8;
+                g_last_rx_ms = mp_now_ms();
                 if(!got_ack && kind == 2 /*HelloAck*/){
                     mp_log_ack(f + 13, plen);
                     got_ack = 1;
@@ -829,6 +861,15 @@ static void* mp_thread(void* arg){
                                   rr_push_snap(rp, px, py, vx, vy, rot, av); } }
                         snprintf(b,sizeof(b),"mp: ROCKET id=%d planet='%s' pos=(%.1f, %.1f) vel=(%.2f, %.2f) rot=%.1f\n",
                                  rid, pl, px, py, vx, vy, rot);
+                        mp_log(b);
+                    } else if(ptype == 13 /*DestroyPart*/){
+                        mp_destroy_part_t event;
+                        if(mp_parse_destroy_part(f + 13, payloadBits, &event)){
+                            if(mp_rr_remove_part(event.rocket_id, event.part_id))
+                                snprintf(b,sizeof(b),"mp: DESTROY PART applied gid=%d part=%d reason=%u explosion=%d\n", event.rocket_id, event.part_id, event.reason, event.create_explosion);
+                            else
+                                snprintf(b,sizeof(b),"mp: DESTROY PART missing gid=%d part=%d\n", event.rocket_id, event.part_id);
+                        } else snprintf(b,sizeof(b),"mp: DESTROY PART malformed bits=%d\n", payloadBits);
                         mp_log(b);
                     } else if(ptype == 5 /*UpdatePlayerAuthority*/){
                         /* v72: 服务端告诉我们"这些火箭归你控制"。不含我们的 global_id = 上行必被丢弃。 */

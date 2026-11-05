@@ -92,5 +92,7 @@ mp_rrocket_t* mp_rr_at(int i);
 void         mp_rr_clear_dirty(int i);
 /* v78: 取渲染时刻（现在 - 120ms）的插值位姿；返回 0 表示没有可用快照 */
 int          mp_rr_sample(int i, double* x, double* y, float* rot);
+typedef struct { double world_time; int rocket_id; int part_id; int create_explosion; unsigned reason; } mp_destroy_part_t;
+int          mp_rr_remove_part(int rocket_id, int part_id);
 
 #endif
