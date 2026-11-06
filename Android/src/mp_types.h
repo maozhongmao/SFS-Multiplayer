@@ -94,5 +94,7 @@ void         mp_rr_clear_dirty(int i);
 int          mp_rr_sample(int i, double* x, double* y, float* rot);
 typedef struct { double world_time; int rocket_id; int part_id; int create_explosion; unsigned reason; } mp_destroy_part_t;
 int          mp_rr_remove_part(int rocket_id, int part_id);
+void         mp_queue_destroy_part(int part_id, int create_explosion, unsigned reason);
+void         mp_on_new_local_rocket(void);
 
 #endif

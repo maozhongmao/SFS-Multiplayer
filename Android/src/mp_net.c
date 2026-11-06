@@ -95,6 +95,8 @@ static char   g_lplanet[40] = "Earth";
 static volatile int g_have_pose = 0;
 static volatile int g_global_id = -1;
 static volatile int g_create_sent = 0;
+static volatile int g_local_id = 1;              /* per-session CreateRocket local id, must change when local rocket changes */
+static volatile int g_destroy_old_gid = -1;      /* old rocket to destroy before creating the replacement */
 static volatile int g_rx_primary = 0;
 /* v166: 屏幕诊断（主力机没 adb，只能让 mod 自己把结论显示出来） */
 static char g_dg_addr[80] = "";
@@ -226,7 +228,7 @@ static void rr_parse_create(const unsigned char* p, int nbytes, int* out_lid, in
     (void)wt; (void)for_launch;
     *out_lid = lid; *out_gid = gid;
     if(gid < 0) return;
-    if(lid == 1) return;   /* 这是"我们自己的火箭"，不能当远端火箭再生成一枚 */
+    if(lid >= 0 && lid == g_local_id) return;   /* 这是"我们自己的火箭"，不能当远端火箭再生成一枚 */
 
     mp_rrocket_t* rr = rr_slot(gid);
     rr->valid = 1;
@@ -578,7 +580,7 @@ static int mp_send_create_rocket_minimal(void){
     bw_t w; bw_clear(&w);
     bw_u8(&w, 9);                       /* PacketType.CreateRocket */
     bw_f64(&w, 0.0);                    /* world_time 由服务端补 */
-    bw_i32(&w, 1);                      /* local_id */
+    bw_i32(&w, g_local_id);             /* local_id */
     bw_i32(&w, -1);                     /* global_id 交给服务端分配 */
     bw_bool(&w, 0);                     /* for_launch */
     bw_str(&w, "MP-Android");           /* rocket_name */
@@ -604,7 +606,7 @@ static int mp_send_create_rocket_full(void){
     w.buf = pay; w.cap = (int)sizeof(pay); w.bit = 0;
     bw2_u8(&w, 9);                       /* PacketType.CreateRocket */
     bw2_f64(&w, 0.0);                    /* world_time 服务端补 */
-    bw2_i32(&w, 1);                      /* local_id */
+    bw2_i32(&w, g_local_id);             /* local_id: changes when local rocket changes */
     bw2_i32(&w, -1);                     /* global_id */
     bw2_bool(&w, 0);                     /* for_launch */
     bw2_str(&w, g_st_name[0] ? g_st_name : "MP-Android");
@@ -662,6 +664,88 @@ static int mp_send_create_rocket_full(void){
 static int mp_send_create_rocket(void){
     if(g_st_nparts > 0) return mp_send_create_rocket_full();
     return mp_send_create_rocket_minimal();
+}
+
+/* Outbound DestroyPart events are produced by the Unity main thread and sent only by the network thread. */
+#define MP_TX_DP_MAX 256
+static pthread_mutex_t g_tx_dp_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct { int part_id; int create_explosion; unsigned reason; } g_tx_dp[MP_TX_DP_MAX];
+static int g_tx_dp_head = 0, g_tx_dp_count = 0;
+
+void mp_queue_destroy_part(int part_id, int create_explosion, unsigned reason){
+    if(part_id < 0) return;
+    if(g_global_id < 0){ mp_log("mp: DestroyPart dropped before global id\n"); return; }
+    pthread_mutex_lock(&g_tx_dp_lock);
+    for(int i = 0; i < g_tx_dp_count; ++i){
+        int at = (g_tx_dp_head + i) % MP_TX_DP_MAX;
+        if(g_tx_dp[at].part_id == part_id){ pthread_mutex_unlock(&g_tx_dp_lock); return; }
+    }
+    if(g_tx_dp_count == MP_TX_DP_MAX){
+        g_tx_dp_head = (g_tx_dp_head + 1) % MP_TX_DP_MAX;
+        --g_tx_dp_count;
+    }
+    int tail = (g_tx_dp_head + g_tx_dp_count) % MP_TX_DP_MAX;
+    g_tx_dp[tail].part_id = part_id;
+    g_tx_dp[tail].create_explosion = create_explosion;
+    g_tx_dp[tail].reason = reason;
+    ++g_tx_dp_count;
+    pthread_mutex_unlock(&g_tx_dp_lock);
+}
+
+static int mp_send_destroy_part_now(int part_id, int create_explosion, unsigned reason){
+    bw_t w; bw_clear(&w);
+    bw_u8(&w, 13);                       /* PacketType.DestroyPart */
+    bw_f64(&w, 0.0);
+    bw_i32(&w, g_global_id);
+    bw_i32(&w, part_id);
+    bw_bool(&w, create_explosion);
+    bw_u8(&w, reason);
+    unsigned char frame[64];
+    int fn = build_frame_bits(frame, sizeof(frame), 3, 6, w.buf, w.bit);
+    return fn > 0 ? send_msg(frame, fn) : -1;
+}
+
+static void mp_drain_destroy_parts(void){
+    if(g_global_id < 0) return;
+    for(int guard = 0; guard < MP_TX_DP_MAX; ++guard){
+        int part_id, create_explosion;
+        unsigned reason;
+        pthread_mutex_lock(&g_tx_dp_lock);
+        if(g_tx_dp_count == 0){ pthread_mutex_unlock(&g_tx_dp_lock); return; }
+        part_id = g_tx_dp[g_tx_dp_head].part_id;
+        create_explosion = g_tx_dp[g_tx_dp_head].create_explosion;
+        reason = g_tx_dp[g_tx_dp_head].reason;
+        g_tx_dp_head = (g_tx_dp_head + 1) % MP_TX_DP_MAX;
+        --g_tx_dp_count;
+        pthread_mutex_unlock(&g_tx_dp_lock);
+        int sent = mp_send_destroy_part_now(part_id, create_explosion, reason);
+        char b[128]; snprintf(b,sizeof(b),"mp: tx DESTROY PART id=%d part=%d ret=%d\n", g_global_id, part_id, sent); mp_log(b);
+    }
+}
+
+static int mp_send_destroy_rocket_now(int rocket_id){
+    bw_t w; bw_clear(&w);
+    bw_u8(&w, 10);                      /* PacketType.DestroyRocket */
+    bw_f64(&w, 0.0);
+    bw_i32(&w, rocket_id);
+    bw_u8(&w, 0);                       /* Intentional */
+    unsigned char frame[64];
+    int fn = build_frame_bits(frame, sizeof(frame), 3, 7, w.buf, w.bit);
+    return fn > 0 ? send_msg(frame, fn) : -1;
+}
+
+void mp_on_new_local_rocket(void){
+    int old = g_global_id;
+    if(old >= 0) g_destroy_old_gid = old;
+    g_global_id = -1;
+    g_create_sent = 0;
+    mp_reset_structure();
+    pthread_mutex_lock(&g_tx_dp_lock);
+    g_tx_dp_head = 0; g_tx_dp_count = 0;
+    pthread_mutex_unlock(&g_tx_dp_lock);
+    ++g_local_id;
+    if(g_local_id <= 0) g_local_id = 1;
+    { char b[128]; snprintf(b,sizeof(b),"mp: new local rocket local_id=%d old_gid=%d\n", g_local_id, old); mp_log(b); }
 }
 
 static int mp_send_primary(void){
@@ -836,7 +920,7 @@ static void* mp_thread(void* arg){
                         /* v74: 整棵零件树解出来，供 v64 生成远端火箭 */
                         int lid9 = -1, gid9 = -1;
                         rr_parse_create(f + 14, plen - 1, &lid9, &gid9);
-                        if(lid9 == 1 && gid9 >= 0 && g_global_id < 0){
+                        if(lid9 == g_local_id && gid9 >= 0 && g_global_id < 0){
                             g_global_id = gid9;
                             snprintf(b,sizeof(b),"mp: OUR ROCKET registered global_id=%d\n", gid9); mp_log(b);
                         }
@@ -909,6 +993,13 @@ static void* mp_thread(void* arg){
             mp_log(b);
             break;
         }
+        if(got_ack){
+            int old_gid = __sync_lock_test_and_set(&g_destroy_old_gid, -1);
+            if(old_gid >= 0){
+                int dr = mp_send_destroy_rocket_now(old_gid);
+                char db[128]; snprintf(db,sizeof(db),"mp: DestroyRocket old gid=%d ret=%d\n", old_gid, dr); mp_log(db);
+            }
+        }
         if(got_ack && g_have_pose && mp_structure_ready() && !g_create_sent){
             if(mp_send_create_rocket() > 0){
                 g_create_sent = 1;
@@ -932,6 +1023,7 @@ static void* mp_thread(void* arg){
                 ctl_logs++;
             }
         }
+        if(got_ack && g_global_id >= 0) mp_drain_destroy_parts();
         /* v186：睡到「下一次 KCP update」为止（1–10ms），比固定 10ms 唤醒更省电也更准时 */
         { IUINT32 n2 = (IUINT32)mp_now_ms();
           int wait = (int)(g_kcp_next - n2);

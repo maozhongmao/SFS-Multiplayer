@@ -29,7 +29,7 @@
 #include <stdlib.h>
 #include <unwind.h>
 #include "mp_types.h"
-#define SFSMP_VERSION "2.0.3.2-diag"   /* 与安装器 / PC 端 / 服务端统一；带后缀用于区分诊断包 */
+#define SFSMP_VERSION "2.1.1.3"   /* own local_id receipt filter */
 
 /* v129: 数据目录运行时化 —— 共存版（改过包名）的 /sdcard/Android/data/<包名>/files 和官方不是同一个，
  * 写死官方包名会导致新包里探针/配置全部静默失效（不同 uid 根本写不进去）。 */
@@ -397,6 +397,22 @@ static volatile int g_stUploaded = 0;
 static v73_part_rec  g_up_parts[1024];
 static v73_joint_rec g_up_joints[4096];
 static v73_stage_rec g_up_stages[64];
+static uint64_t g_known_part_fp[1024];
+static int g_known_part_id[1024];
+static int g_known_part_n = 0;
+static void* g_last_local_rocket = NULL;
+
+static uint64_t part_fingerprint(const v73_part_rec* p){
+    uint64_t h = 1469598103934665603ull;
+    if(!p) return 0;
+    for(const unsigned char* s = (const unsigned char*)p->name; *s; ++s){ h ^= *s; h *= 1099511628211ull; }
+    { unsigned b; memcpy(&b,&p->x,4); h ^= b; h *= 1099511628211ull; }
+    { unsigned b; memcpy(&b,&p->y,4); h ^= b; h *= 1099511628211ull; }
+    { unsigned b; memcpy(&b,&p->ox,4); h ^= b; h *= 1099511628211ull; }
+    { unsigned b; memcpy(&b,&p->oy,4); h ^= b; h *= 1099511628211ull; }
+    { unsigned b; memcpy(&b,&p->oz,4); h ^= b; h *= 1099511628211ull; }
+    return h ? h : 1;
+}
 static void upload_structure(void* rocket);
 static void log_exc(void* exc, const char* tag);
 static void ux_poll_conn(void);
@@ -581,7 +597,15 @@ static void publish_local_pose(void){
     (void)t;
     mp_set_local_pose(px, py, vx, vy, pname, rot);
     mp_set_local_angular(av); }
+    if(ro && g_last_local_rocket && ro != g_last_local_rocket){
+        g_stUploaded = 0;
+        g_known_part_n = 0;
+        mp_on_new_local_rocket();
+        { char lb[128]; snprintf(lb,sizeof(lb),"v: local rocket changed ptr=%p -> re-register\n", ro); log_app(lb); }
+    }
+    if(ro) g_last_local_rocket = ro;
     if(!g_stUploaded) upload_structure(ro);      /* v73: 第一次拿到本机火箭就把结构发上去 */
+    else if((g_frame % 60) == 0) upload_structure(ro);   /* 2.1.1.0: detect locally destroyed parts */
 }
 
 /* v73: 用游戏自己的 RocketSave 序列化当前火箭，把 parts/joints/stages 抄进 mp_net。
@@ -591,6 +615,7 @@ static void publish_local_pose(void){
  */
 static void upload_structure(void* rocket){
     char b[220];
+    int wasUploaded = g_stUploaded;
     if(!rocket) return;
     if(!g_rsCls || !g_mRsCtor || !g_mNewObj){ log_app("v73: RocketSave class missing\n"); return; }
     void* obj = g_mNewObj(g_rsCls);
@@ -661,10 +686,34 @@ static void upload_structure(void* rocket){
     { char nm[64] = "MP-Android";
       void* nms = *(void**)((char*)obj + 0x10);
       if(nms) u16_to_ascii(nms, nm, sizeof(nm));
-      mp_set_structure(nm, g_up_parts, np, g_up_joints, nj2, g_up_stages, ns2);
-      g_stUploaded = 1;
-      snprintf(b, sizeof(b), "v73: uploaded structure parts=%d joints=%d stages=%d name='%s'\n", np, nj2, ns2, nm);
-      log_app(b); }
+      if(!wasUploaded){
+          mp_set_structure(nm, g_up_parts, np, g_up_joints, nj2, g_up_stages, ns2);
+          g_stUploaded = 1;
+          g_known_part_n = np;
+          for(i=0;i<np;i++){ g_known_part_id[i] = i + 1; g_known_part_fp[i] = part_fingerprint(&g_up_parts[i]); }
+          snprintf(b, sizeof(b), "v73: uploaded structure parts=%d joints=%d stages=%d name='%s'\n", np, nj2, ns2, nm);
+          log_app(b);
+      } else {
+          int used[1024] = {0};
+          int kept = 0;
+          for(i=0;i<g_known_part_n;i++){
+              int found = 0;
+              for(k=0;k<np;k++){
+                  if(!used[k] && g_known_part_fp[i] == part_fingerprint(&g_up_parts[k])){ used[k] = 1; found = 1; break; }
+              }
+              if(found){
+                  g_known_part_fp[kept] = g_known_part_fp[i];
+                  g_known_part_id[kept] = g_known_part_id[i];
+                  ++kept;
+              } else {
+                  mp_queue_destroy_part(g_known_part_id[i], 0, 4);
+                  snprintf(b,sizeof(b),"mp: local part destroyed -> queue DestroyPart part=%d\n", g_known_part_id[i]);
+                  log_app(b);
+              }
+          }
+          g_known_part_n = kept;
+      }
+    }
 }
 
 static void dump_rockets(void){
@@ -994,7 +1043,7 @@ static void scene_poll(void){
     if(strcmp(tmp, g_sceneName)!=0){
         strncpy(g_sceneName, tmp, 63); g_sceneName[63]=0;
         char b[120]; snprintf(b,sizeof(b),"v48: scene='%s'\n", g_sceneName); log_app(b);
-        if(!strstr(g_sceneName, "World_Mobile")){ g_stUploaded = 0; mp_reset_structure(); }  /* v73: 离开世界就作废旧结构 */
+        if(!strstr(g_sceneName, "World_Mobile")){ g_stUploaded = 0; g_known_part_n = 0; mp_reset_structure(); }  /* v73: 离开世界就作废旧结构 */
     }
 }
 

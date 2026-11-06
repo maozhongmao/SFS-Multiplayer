@@ -22,7 +22,7 @@ static inline uint64_t mp_destroy_part_bits(mp_destroy_part_reader_t* r, int cou
 }
 
 static inline int mp_parse_destroy_part(const unsigned char* payload, int payload_bits, mp_destroy_part_t* out){
-    if(!payload || !out || payload_bits != 145 || payload[0] != 13) return 0;
+    if(!payload || !out || payload_bits < 145 || payload_bits > 152 || payload[0] != 13) return 0;
     mp_destroy_part_reader_t r = { payload, payload_bits, 0, 0 };
     if(mp_destroy_part_bits(&r, 8) != 13) return 0;
     uint64_t wt_bits = mp_destroy_part_bits(&r, 64);
@@ -32,7 +32,7 @@ static inline int mp_parse_destroy_part(const unsigned char* payload, int payloa
     packet.part_id = (int32_t)(uint32_t)mp_destroy_part_bits(&r, 32);
     packet.create_explosion = (int)mp_destroy_part_bits(&r, 1);
     packet.reason = (unsigned)mp_destroy_part_bits(&r, 8);
-    if(r.failed || r.pos != payload_bits || packet.rocket_id < 0 || packet.part_id < 0) return 0;
+    if(r.failed || r.pos > payload_bits || payload_bits - r.pos > 7 || packet.rocket_id < 0 || packet.part_id < 0) return 0;
     *out = packet;
     return 1;
 }

@@ -24,13 +24,14 @@ int main(void){
     assert(bit == 145);
 
     mp_destroy_part_t event;
-    assert(mp_parse_destroy_part(payload, bit, &event));
+    assert(mp_parse_destroy_part(payload, 152, &event));
     assert(event.world_time == 1234.5);
     assert(event.rocket_id == 7654321);
     assert(event.part_id == 998877);
     assert(event.create_explosion == 1);
     assert(event.reason == 4);
-    assert(!mp_parse_destroy_part(payload, bit - 1, &event));
+    assert(!mp_parse_destroy_part(payload, 144, &event));
+    assert(!mp_parse_destroy_part(payload, 153, &event));
     payload[0] = 12;
     assert(!mp_parse_destroy_part(payload, bit, &event));
     puts("mp_destroy_part_wire_test OK");
