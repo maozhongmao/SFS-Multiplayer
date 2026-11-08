@@ -18,7 +18,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - `.gitattributes`：垃圾文件。
 - `LICENCE.txt`：本项目的 [MPL LICENSE](LICENSE.txt)；手机端为 [GPL-3.0 LICENSE](Android/LICENSE.txt)。
 - `README.md`：本项目的 [README](README.md)。
-- `ROADMAP.md`：本项目的 [ROADMAP](ROADMAP.md)。
+- `ROADMAP.md`：本项目的更新计划。
 
 客户端模组安装在 SFS 的 `Mods` 目录中，服务端作为独立程序运行。客户端与服务端需要使用相互匹配的版本。
 
@@ -56,10 +56,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 ## Star历史
 
 感谢所有使用SFS-Multiplayer、报告漏洞、请求功能、测试构建并贡献修复的朋友们。
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod&type=date&legend=bottom-right)](https://www.star-history.com/?repos=maozhongmao%2Fsfs-multiplayer%2Csfsplayer-sys%2Fspaceflight-simulator-multiplayermod&type=date&legend=bottom-right)
+[![Star History Chart](https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer&type=date&legend=bottom-right)](https://www.star-history.com/?repos=maozhongmao%2Fsfs-multiplayer&type=date&legend=bottom-right)
 
 ## 文档
 
