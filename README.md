@@ -1,6 +1,6 @@
 # Spaceflight-simulator-Multiplayer（Moblie and PC）
 
-Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.net
+Spaceflight Simulator 的实时多人联机项目。**公共服务器：stch.de5.net**
 
 本项目通过客户端模组和独立服务端，让多个玩家进入同一个 SFS 世界，实时同步玩家火箭及其状态，并提供多人联机所需的基础网络功能。
 
@@ -16,7 +16,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 - `Server/`：独立联机服务端源码。
 - `.gitignore`：垃圾文件。
 - `.gitattributes`：垃圾文件。
-- `LICENCE.txt`：本项目的 [MPL LICENSE](LICENSE.txt)；手机端为 [GPL-3.0 LICENSE](Android/LICENSE.txt)。
+- `LICENCE.txt`：本项目的 [MPL-2.0 LICENSE](LICENSE.txt)；手机端为 [GPL-3.0 LICENSE](Android/LICENSE.txt)。
 - `README.md`：本项目的 [README](README.md)。
 - `ROADMAP.md`：本项目的更新计划。
 
@@ -86,8 +86,8 @@ https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer
 
 ## 联系方式
 
-- QQ Group: 679991439
-- Email: stch-stuido@stch.de5.net
+- QQ群: 679991439
+- 邮箱: stch-stuido@stch.de5.net
 
 Copyright (c) 2026 STCH Studio
 Developer: maozhongmao / yangchengtong
