@@ -56,6 +56,7 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 ## Star历史
 
 感谢所有使用SFS-Multiplayer、报告漏洞、请求功能、测试构建并贡献修复的朋友们。
+
 [![Star History Chart](https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer&type=date&legend=bottom-right)](https://www.star-history.com/?repos=maozhongmao%2Fsfs-multiplayer&type=date&legend=bottom-right)
 
 ## 文档
