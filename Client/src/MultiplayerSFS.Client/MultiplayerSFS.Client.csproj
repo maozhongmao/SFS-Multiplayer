@@ -1,4 +1,4 @@
-<!--
+﻿<!--
   This Source Code Form is subject to the terms of the Mozilla Public
   License, v. 2.0. If a copy of the MPL was not distributed with this
   file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -6,10 +6,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net48</TargetFramework>
-    <AssemblyName>SFS-Multiplayer-1.6-V1.4</AssemblyName>
-    <Version>2.0.1.0</Version>
-    <AssemblyVersion>2.0.2.0</AssemblyVersion>
-    <FileVersion>2.0.2.0</FileVersion>
+    <AssemblyName>SFS-Multiplayer-1.6-V2.1</AssemblyName>
+    <Version>2.1.0.0</Version>
+    <AssemblyVersion>2.1.0.0</AssemblyVersion>
+    <FileVersion>2.1.0.0</FileVersion>
     <RootNamespace>MultiplayerSFS</RootNamespace>
     <LangVersion>12.0</LangVersion>
     <Nullable>disable</Nullable>
@@ -17,22 +17,22 @@
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- 双版本：默认 v16（1.6）；-p:GameVersion=v15 出 1.5 包（老电脑）。
-         v15 会打开 SFS15 条件编译 + 切到 refs/v15，差异只集中在 3 个文件（见 Port15/PORT-NOTES.md）。 -->
+    <!-- 鍙岀増鏈細榛樿 v16锛?.6锛夛紱-p:GameVersion=v15 鍑?1.5 鍖咃紙鑰佺數鑴戯級銆?
+         v15 浼氭墦寮€ SFS15 鏉′欢缂栬瘧 + 鍒囧埌 refs/v15锛屽樊寮傚彧闆嗕腑鍦?3 涓枃浠讹紙瑙?Port15/PORT-NOTES.md锛夈€?-->
     <GameVersion Condition="'$(GameVersion)' == ''">v16</GameVersion>
     <GameReferences>$(MSBuildProjectDirectory)\..\..\refs\$(GameVersion)</GameReferences>
     <DefineConstants Condition="'$(GameVersion)' == 'v15'">$(DefineConstants);SFS15</DefineConstants>
-    <!-- 产物目录：1.6 与 1.5 两个包都落到同一个 release 目录（不再双写到 artifacts/）。
-         注意：两个包共用同一个 OutputPath 时，MSBuild 的增量清理会把另一个删掉，
-         所以出双包必须「分别构建 -> 各自暂存 -> 再合并」。 -->
-    <AssemblyName Condition="'$(GameVersion)' == 'v15'">SFS-Multiplayer-1.5-V2.0</AssemblyName>
-    <AssemblyName Condition="'$(GameVersion)' != 'v15'">SFS-Multiplayer-1.6-V2.0</AssemblyName>
+    <!-- 浜х墿鐩綍锛?.6 涓?1.5 涓や釜鍖呴兘钀藉埌鍚屼竴涓?release 鐩綍锛堜笉鍐嶅弻鍐欏埌 artifacts/锛夈€?
+         娉ㄦ剰锛氫袱涓寘鍏辩敤鍚屼竴涓?OutputPath 鏃讹紝MSBuild 鐨勫閲忔竻鐞嗕細鎶婂彟涓€涓垹鎺夛紝
+         鎵€浠ュ嚭鍙屽寘蹇呴』銆屽垎鍒瀯寤?-> 鍚勮嚜鏆傚瓨 -> 鍐嶅悎骞躲€嶃€?-->
+    <AssemblyName Condition="'$(GameVersion)' == 'v15'">SFS-Multiplayer-1.5-V2.1</AssemblyName>
+    <AssemblyName Condition="'$(GameVersion)' != 'v15'">SFS-Multiplayer-1.6-V2.1</AssemblyName>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>$(MSBuildProjectDirectory)\..\..\release-2.0.2.0\</OutputPath>
-    <!-- 同目录下的 MultiplayerSFS.Common.Kcp 是独立工程，但它嵌在本工程目录内：
-         默认源码通配会把它的 obj/**/*.cs（含自动生成的 AssemblyInfo）也编译进来，
-         与本工程手写的 Properties/AssemblyInfo.cs 冲突（CS0579 特性重复）。
-         排除整个子目录及其 obj/bin。 -->
+    <!-- 鍚岀洰褰曚笅鐨?MultiplayerSFS.Common.Kcp 鏄嫭绔嬪伐绋嬶紝浣嗗畠宓屽湪鏈伐绋嬬洰褰曞唴锛?
+         榛樿婧愮爜閫氶厤浼氭妸瀹冪殑 obj/**/*.cs锛堝惈鑷姩鐢熸垚鐨?AssemblyInfo锛変篃缂栬瘧杩涙潵锛?
+         涓庢湰宸ョ▼鎵嬪啓鐨?Properties/AssemblyInfo.cs 鍐茬獊锛圕S0579 鐗规€ч噸澶嶏級銆?
+         鎺掗櫎鏁翠釜瀛愮洰褰曞強鍏?obj/bin銆?-->
     <DefaultItemExcludes>$(DefaultItemExcludes);MultiplayerSFS.Common.Kcp\obj\**;MultiplayerSFS.Common.Kcp\bin\**</DefaultItemExcludes>
   </PropertyGroup>
 
@@ -41,8 +41,8 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
-    <!-- 玩家只填域名时查 SRV 拿端口用。DnsClient 的 net472 目标只依赖 System.Buffers，
-         两者都由 Costura 内嵌，发布物仍然是单个 dll。 -->
+    <!-- 鐜╁鍙～鍩熷悕鏃舵煡 SRV 鎷跨鍙ｇ敤銆侱nsClient 鐨?net472 鐩爣鍙緷璧?System.Buffers锛?
+         涓よ€呴兘鐢?Costura 鍐呭祵锛屽彂甯冪墿浠嶇劧鏄崟涓?dll銆?-->
     <PackageReference Include="DnsClient" Version="1.8.0" />
   </ItemGroup>
 
@@ -63,3 +63,4 @@
     <Reference Include="UnityEngine.UnityAnalyticsModule" HintPath="$(GameReferences)\UnityEngine.UnityAnalyticsModule.dll" Private="false" />
   </ItemGroup>
 </Project>
+

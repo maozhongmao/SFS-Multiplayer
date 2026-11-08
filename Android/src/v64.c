@@ -29,7 +29,7 @@
 #include <stdlib.h>
 #include <unwind.h>
 #include "mp_types.h"
-#define SFSMP_VERSION "2.1.1.3"   /* own local_id receipt filter */
+#define SFSMP_VERSION "2.1.3.7"   /* periodic launchpad ghost cleanup */
 
 /* v129: 数据目录运行时化 —— 共存版（改过包名）的 /sdcard/Android/data/<包名>/files 和官方不是同一个，
  * 写死官方包名会导致新包里探针/配置全部静默失效（不同 uid 根本写不进去）。 */
@@ -223,6 +223,7 @@ static volatile int g_pick_kind = 0;
 static volatile int g_clone_done = 0;
 static volatile int g_do_clone = 0;
 static int g_offName = -1, g_offLoc = -1;
+static void* g_locCls = NULL;
 static fn_ri g_ri=NULL; static fn_alg g_alg=NULL; static fn_unbox g_unbox=NULL; static fn_schars g_schars=NULL;
 static volatile int g_frame = 0;
 static volatile int g_ready = 0;
@@ -363,6 +364,7 @@ static int g_offPlanetLoader=0;
 static void* g_plCls=NULL, *g_scDataCls=NULL, *g_mGetLaunchPad=NULL;
 static int g_offSpaceCenter=0;
 static int g_viewPinned=0;
+static int g_padValid=0; static double g_padX=0, g_padY=0;
 static int g_pinTries=0;
 static int g_dumpDone=0;
 static int g_rotEulerLogged=0;
@@ -401,6 +403,26 @@ static uint64_t g_known_part_fp[1024];
 static int g_known_part_id[1024];
 static int g_known_part_n = 0;
 static void* g_last_local_rocket = NULL;
+#define MP_PENDING_MAX 128
+static int g_pending_part_id[MP_PENDING_MAX];
+static int g_pending_n = 0;
+static int g_pending_deadline = 0;
+static void* g_known_part_ptr[1024];
+static int g_have_part_ptrs = 0;
+static int g_offPartHolder = -1;
+static void* g_mPHGetArray = NULL;
+static int read_part_ptrs(void* rocket, void** out, int cap);
+static int find_part_owner(void* exclude, void* part, void** owner);
+
+static uint32_t deterministic_part_id(const v73_part_rec* p){
+    uint32_t h = 2166136261u;
+    if(!p) return 1;
+    for(const char* s=p->name; *s; ++s){ h ^= (uint32_t)(unsigned char)*s; h *= 16777619u; }
+    { double d=(double)p->x; unsigned long long b; memcpy(&b,&d,8); h ^= (uint32_t)(b ^ (b >> 32)); h *= 16777619u; }
+    { double d=(double)p->y; unsigned long long b; memcpy(&b,&d,8); h ^= (uint32_t)(b ^ (b >> 32)); h *= 16777619u; }
+    uint32_t id = h & 0x7fffffffu;
+    return id ? id : 1u;
+}
 
 static uint64_t part_fingerprint(const v73_part_rec* p){
     uint64_t h = 1469598103934665603ull;
@@ -419,6 +441,20 @@ static void ux_poll_conn(void);
 static void ux_connect_started(void);
 
 static void dump_rockets(void);
+static void clear_remote_pad_rockets(void){
+    if(!g_padValid) return;
+    int n = mp_rr_count();
+    for(int i=0;i<n;i++){
+        mp_rrocket_t* rr = mp_rr_at(i);
+        if(!rr || !rr->valid || !rr->has_structure) continue;
+        double dx = rr->x - g_padX, dy = rr->y - g_padY;
+        if(dx*dx + dy*dy <= 2500.0){   /* 50 m */
+            mp_queue_destroy_rocket(rr->gid);
+            { char b[140]; snprintf(b,sizeof(b),"v219: clear pad rocket gid=%d at (%.1f,%.1f)\n", rr->gid, rr->x, rr->y); log_app(b); }
+        }
+    }
+}
+
 static void publish_local_pose(void){
     if(!g_rockCls || !g_rockType || !g_findMethod || !g_mGetValue || g_offLoc < 0) return;
     /* v167: 平滑 —— 这个函数原来每 30 帧才被调一次（60fps 下 2Hz，30fps 下正好 1Hz，
@@ -600,12 +636,26 @@ static void publish_local_pose(void){
     if(ro && g_last_local_rocket && ro != g_last_local_rocket){
         g_stUploaded = 0;
         g_known_part_n = 0;
-        mp_on_new_local_rocket();
-        { char lb[128]; snprintf(lb,sizeof(lb),"v: local rocket changed ptr=%p -> re-register\n", ro); log_app(lb); }
+        g_pending_n = 0;
+        g_pending_deadline = 0;
+        g_have_part_ptrs = 0;
+        clear_remote_pad_rockets();
+        mp_reupload_structure();
+        { char lb[128]; snprintf(lb,sizeof(lb),"v: local rocket changed ptr=%p -> reupload structure on same gid\n", ro); log_app(lb); }
     }
+    if(ro && !g_last_local_rocket) clear_remote_pad_rockets();
     if(ro) g_last_local_rocket = ro;
     if(!g_stUploaded) upload_structure(ro);      /* v73: 第一次拿到本机火箭就把结构发上去 */
     else if((g_frame % 60) == 0) upload_structure(ro);   /* 2.1.1.0: detect locally destroyed parts */
+    if(g_pending_n > 0 && g_pending_deadline > 0 && (int)g_frame >= g_pending_deadline){
+        int pi;
+        for(pi=0; pi<g_pending_n; pi++){
+            mp_queue_destroy_part(g_pending_part_id[pi], 0, 4);
+            { char pb[128]; snprintf(pb,sizeof(pb),"mp: confirmed DestroyPart part=%d\n", g_pending_part_id[pi]); log_app(pb); }
+        }
+        g_pending_n = 0;
+        g_pending_deadline = 0;
+    }
 }
 
 /* v73: 用游戏自己的 RocketSave 序列化当前火箭，把 parts/joints/stages 抄进 mp_net。
@@ -687,28 +737,76 @@ static void upload_structure(void* rocket){
       void* nms = *(void**)((char*)obj + 0x10);
       if(nms) u16_to_ascii(nms, nm, sizeof(nm));
       if(!wasUploaded){
+          for(i=0;i<np;i++){
+              uint32_t id = deterministic_part_id(&g_up_parts[i]);
+              int collision = 1;
+              while(collision){
+                  collision = 0;
+                  for(k=0;k<i;k++) if(g_known_part_id[k] == (int)id){ collision = 1; id = (id == 0x7fffffffu) ? 1u : id + 1u; break; }
+              }
+              g_up_parts[i].id = (int)id;
+              g_known_part_id[i] = (int)id;
+              g_known_part_fp[i] = part_fingerprint(&g_up_parts[i]);
+          }
+          for(i=0;i<nj2;i++){
+              int a = g_up_joints[i].a, b = g_up_joints[i].b;
+              if(a >= 1 && a <= np) g_up_joints[i].a = g_up_parts[a-1].id;
+              if(b >= 1 && b <= np) g_up_joints[i].b = g_up_parts[b-1].id;
+          }
+          for(i=0;i<ns2;i++){
+              int jj;
+              for(jj=0;jj<g_up_stages[i].n;jj++){
+                  int v = g_up_stages[i].ids[jj];
+                  if(v >= 1 && v <= np) g_up_stages[i].ids[jj] = g_up_parts[v-1].id;
+              }
+          }
           mp_set_structure(nm, g_up_parts, np, g_up_joints, nj2, g_up_stages, ns2);
           g_stUploaded = 1;
           g_known_part_n = np;
-          for(i=0;i<np;i++){ g_known_part_id[i] = i + 1; g_known_part_fp[i] = part_fingerprint(&g_up_parts[i]); }
+          { void* ptrs[1024]; int npr = read_part_ptrs(rocket, ptrs, 1024);
+            g_have_part_ptrs = (npr == np) ? 1 : 0;
+            if(g_have_part_ptrs){ for(i=0;i<np;i++) g_known_part_ptr[i] = ptrs[i]; }
+            { char pb[120]; snprintf(pb,sizeof(pb),"v218: part pointers n=%d expect=%d use=%d\n", npr, np, g_have_part_ptrs); log_app(pb); } }
           snprintf(b, sizeof(b), "v73: uploaded structure parts=%d joints=%d stages=%d name='%s'\n", np, nj2, ns2, nm);
           log_app(b);
       } else {
           int used[1024] = {0};
           int kept = 0;
+          void* cur[1024]; int ncur = -1;
+          if(g_have_part_ptrs) ncur = read_part_ptrs(rocket, cur, 1024);
+          int use_ptrs = (ncur >= 0) ? 1 : 0;
+          if(g_have_part_ptrs && !use_ptrs){ snprintf(b,sizeof(b),"v218: part pointers unavailable, fallback fingerprint\n"); log_app(b); }
           for(i=0;i<g_known_part_n;i++){
               int found = 0;
-              for(k=0;k<np;k++){
-                  if(!used[k] && g_known_part_fp[i] == part_fingerprint(&g_up_parts[k])){ used[k] = 1; found = 1; break; }
+              if(use_ptrs && g_known_part_ptr[i]){
+                  for(k=0;k<ncur;k++){
+                      if(!used[k] && cur[k] == g_known_part_ptr[i]){ used[k] = 1; found = 1; break; }
+                  }
+              } else {
+                  for(k=0;k<np;k++){
+                      if(!used[k] && g_known_part_fp[i] == part_fingerprint(&g_up_parts[k])){ used[k] = 1; found = 1; break; }
+                  }
               }
               if(found){
                   g_known_part_fp[kept] = g_known_part_fp[i];
                   g_known_part_id[kept] = g_known_part_id[i];
+                  g_known_part_ptr[kept] = use_ptrs ? g_known_part_ptr[i] : NULL;
                   ++kept;
               } else {
-                  mp_queue_destroy_part(g_known_part_id[i], 0, 4);
-                  snprintf(b,sizeof(b),"mp: local part destroyed -> queue DestroyPart part=%d\n", g_known_part_id[i]);
-                  log_app(b);
+                  void* owner = NULL;
+                  if(use_ptrs && g_known_part_ptr[i] && find_part_owner(rocket, g_known_part_ptr[i], &owner)){
+                      snprintf(b,sizeof(b),"v218: part moved to local rocket %p -> no DestroyPart (id=%d)\n", owner, g_known_part_id[i]);
+                      log_app(b);
+                  } else {
+                      int id = g_known_part_id[i], dup = 0;
+                      for(k=0;k<g_pending_n;k++) if(g_pending_part_id[k] == id){ dup = 1; break; }
+                      if(!dup && g_pending_n < MP_PENDING_MAX){
+                          g_pending_part_id[g_pending_n++] = id;
+                          if(g_pending_deadline == 0) g_pending_deadline = (int)g_frame + 90;
+                          snprintf(b,sizeof(b),"mp: part missing -> pending DestroyPart part=%d ptr=%p\n", id, g_known_part_ptr[i]);
+                          log_app(b);
+                      }
+                  }
               }
           }
           g_known_part_n = kept;
@@ -1043,7 +1141,7 @@ static void scene_poll(void){
     if(strcmp(tmp, g_sceneName)!=0){
         strncpy(g_sceneName, tmp, 63); g_sceneName[63]=0;
         char b[120]; snprintf(b,sizeof(b),"v48: scene='%s'\n", g_sceneName); log_app(b);
-        if(!strstr(g_sceneName, "World_Mobile")){ g_stUploaded = 0; g_known_part_n = 0; mp_reset_structure(); }  /* v73: 离开世界就作废旧结构 */
+        if(!strstr(g_sceneName, "World_Mobile")){ g_stUploaded = 0; g_known_part_n = 0; g_pending_n = 0; g_pending_deadline = 0; g_have_part_ptrs = 0; mp_reset_structure(); }  /* v73: 离开世界就作废旧结构 */
     }
 }
 
@@ -2807,6 +2905,22 @@ static int rr_snapshot(void** out, int cap){
     return n;
 }
 
+static int find_part_owner(void* exclude, void* part, void** owner){
+    if(!part || !owner) return 0;
+    void* rockets[256]; int n = rr_snapshot(rockets, 256);
+    for(int i=0;i<n;i++){
+        void* r = rockets[i];
+        if(!r || r == exclude) continue;
+        int remote = 0;
+        for(int k=0;k<MP_RR_MAX;k++){ if(g_rrSpawned[k] && g_rrRocket[k] == r){ remote = 1; break; } }
+        if(remote) continue;
+        void* ptrs[1024]; int np = read_part_ptrs(r, ptrs, 1024);
+        if(np < 0) continue;
+        for(int j=0;j<np;j++) if(ptrs[j] == part){ *owner = r; return 1; }
+    }
+    return 0;
+}
+
 static void* rr_find_added(void** snap, int nsnap){
     void* cur[64]; int n=rr_snapshot(cur,64);
     if(nsnap<0) nsnap=0; if(nsnap>64) nsnap=64;
@@ -3229,6 +3343,11 @@ static void rr_sync_pose(int i){
             g_rrSpawned[i]=0; g_rrRocket[i]=NULL; g_rrSimOff[i]=0;
             return;
         }
+        if(g_locCls && g_mObjGetClass && g_mObjGetClass(loc) != g_locCls){
+            { char b4[150]; snprintf(b4,sizeof(b4),"v110: rocket[%d] stale Location (cls=%p) -> skip\n", i, g_mObjGetClass(loc)); log_app(b4); }
+            g_rrSpawned[i]=0; g_rrRocket[i]=NULL; g_rrTries[i]=0; g_rrSimOff[i]=0;
+            return;
+        }
         {
             void* e5=NULL;
             void* lv=g_ri(g_mGetValue, loc, NULL, &e5);
@@ -3345,21 +3464,11 @@ static void rr_check_alive(void){
         }
         passed++;
     }
-    /* 只在数目很小时才用完整列表比对兜底，避免 >64 时的误判 */
-    if(passed > 0){
-        void* snap[64]; int n=rr_snapshot(snap,64);
-        if(n < 64){
-            for(int i=0;i<MP_RR_MAX;i++){
-                if(!g_rrSpawned[i] || !g_rrRocket[i]) continue;
-                int found=0; for(int k=0;k<n;k++) if(snap[k]==g_rrRocket[i]){ found=1; break; }
-                if(!found){ char b[140]; snprintf(b,sizeof(b),"v110: rocket[%d] not in list -> respawn allowed\n", i); log_app(b);
-                    g_rrSpawned[i]=0; g_rrRocket[i]=NULL; g_rrTries[i]=0; g_rrSimOff[i]=0; }
-            }
-        } else {
-            static int logged=0;
-            if(!logged){ logged=1; char b[150]; snprintf(b,sizeof(b),"v110: rockets=%d >= 64, skip list check\n", n); log_app(b); }
-        }
-    }
+    /* v219: 删除“列表里找不到就判死”的兜底。
+       场景火箭多时 rr_snapshot 会截断/漏项，这段会把仍存活的远端火箭批量清掉，
+       造成爆炸后 1 秒全消失、5 秒后重生的空档。只保留对象类型校验；
+       对象真被销毁时由 rr_sync_pose 的类型校验清槽。 */
+    (void)passed;
 }
 
 /* ---- v97: 把服务器快照里的世界时间写进游戏 -----------------------------------
@@ -3377,6 +3486,37 @@ static size_t (*g_imgClassCount)(void*) = NULL;
 static void* (*g_imgClassGet)(void*, int) = NULL;
 static void* (*g_cgfn)(void*, const char*) = NULL;
 static int   (*g_fgo)(void*) = NULL;
+static int ensure_part_holder_offset(void){
+    if(g_offPartHolder >= 0) return 1;
+    if(!g_cgfn || !g_fgo || !g_rockCls) return 0;
+    void* f = g_cgfn(g_rockCls, "partHolder");
+    if(!f) return 0;
+    g_offPartHolder = g_fgo(f);
+    { char pb[96]; snprintf(pb,sizeof(pb),"v218: partHolder field offset=%d\n", g_offPartHolder); log_app(pb); }
+    return g_offPartHolder >= 0;
+}
+
+static int read_part_ptrs(void* rocket, void** out, int cap){
+    if(!rocket || !out || cap <= 0) return -1;
+    if(!ensure_part_holder_offset() || !g_mObjGetClass || !g_ri || !g_alg) return -1;
+    void* ph = *(void**)((char*)rocket + g_offPartHolder);
+    if(!ph) return -1;
+    if(!g_mPHGetArray){
+        void* cls = g_mObjGetClass(ph);
+        g_mPHGetArray = cls && g_gm ? g_gm(cls, "GetArray", 0) : NULL;
+        { char pb[96]; snprintf(pb,sizeof(pb),"v218: PartHolder.GetArray=%p\n", g_mPHGetArray); log_app(pb); }
+    }
+    if(!g_mPHGetArray) return -1;
+    void* e = NULL;
+    void* arr = g_ri(g_mPHGetArray, ph, NULL, &e);
+    if(!arr || e) return -1;
+    int n = (int)g_alg(arr);
+    if(n < 0) n = 0;
+    if(n > cap) n = cap;
+    for(int i=0;i<n;i++) out[i] = ((void**)((char*)arr + 0x20))[i];
+    return n;
+}
+
 static int world_time_resolve(void){
     if (g_wtResolved) return g_wtCls ? 1 : 0;
     g_wtResolved = 1;
@@ -3482,6 +3622,11 @@ static void pin_view_to_launchpad(void){
     snprintf(b,sizeof(b),"v100: LaunchPadLocation=%p exc=%p\n", loc, e2); log_app(b);
     if(!loc || e2) { log_app("v100: pin aborted (no launchpad loc)\n"); return; }
     if(e2) log_exc(e2, "v100:");
+    if(g_mGetValue){
+        void* ev=NULL; void* lv=g_ri(g_mGetValue, loc, NULL, &ev);
+        if(lv && !ev){ g_padX=*(double*)((char*)lv+0x20); g_padY=*(double*)((char*)lv+0x28); g_padValid=1;
+            { char pb[120]; snprintf(pb,sizeof(pb),"v219: pad coords=(%.1f,%.1f)\n", g_padX, g_padY); log_app(pb); } }
+    }
     /* WorldView.main 静态实例 */
     void* wv = NULL; g_staticGet(g_worldViewMainField, &wv);
     snprintf(b,sizeof(b),"v100: WorldView.main=%p\n", wv); log_app(b);
@@ -3548,6 +3693,7 @@ static void hook_update(void* self){
     /* v170: 回滚 v167 的 30Hz 采样 —— 装机后"进世界就崩"（tombstone #08 在 hook_update+18032，
      * 栈上是 publish_local_pose 走 il2cpp 时踩到场景切换中的失效对象）。
      * 先恢复 30 帧/次（1~2Hz）这个已验证可用的节奏，平滑另找不碰对象生命周期的做法。 */
+    if (g_ready && (f % 120) == 0 && strstr(g_sceneName, "World_Mobile")) clear_remote_pad_rockets();
     if (g_ready && (f % 30) == 0 && strstr(g_sceneName, "World_Mobile") && g_rockCls) publish_local_pose();
     if ((f % 15) == 0) ux_poll_conn();
     /* ---- v97: 刚进世界时把服务器快照的「世界时间」推给游戏 -------------------
@@ -4133,7 +4279,7 @@ static void* worker(void* arg){
 
     void* locCls = fLoc ? tgoc(fgt(fLoc)) : NULL;
     if(!locCls) locCls=cf(img,"SFS.World","FNVQPOCIQHTEDVSZ");
-    if(locCls){ g_mGetValue = gm(locCls,"get_Value",0); g_mSetValue = gm(locCls,"set_Value",1); }
+    if(locCls){ g_locCls = locCls; g_mGetValue = gm(locCls,"get_Value",0); g_mSetValue = gm(locCls,"set_Value",1); }
     { snprintf(b,sizeof(b),"v88: locCls=%p get_Value=%p set_Value=%p locOff=%d\n", locCls, g_mGetValue, g_mSetValue, g_offLoc); log_app(b); }
 
     void* compCls=cf(coreImg,"UnityEngine","Component");

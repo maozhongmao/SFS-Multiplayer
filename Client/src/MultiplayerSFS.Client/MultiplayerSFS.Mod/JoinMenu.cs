@@ -1,4 +1,4 @@
-// This Source Code Form is subject to the terms of the Mozilla Public
+﻿// This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
@@ -26,14 +26,14 @@ public class JoinMenu : BasicMenu
 	public static Window window;
 	public static GameObject windowHolder;
 	private static readonly int windowID = Builder.GetRandomID();
-	// 内容实高 = 输入区120 + 声明区(320+8+24=352) + 按钮90 + 两处间距40 + 内边距20 = 622，
-	// 加标题栏约 65 → 742 时底部留白与上一版(760/内容640)一致。要增减底部留白直接改这个数。
-	// 【2026-10-06 底部 +12 像素】用户逐像素数出来"底部差 12 像素"，要求补上。
-	// 外层布局是 childAlignment: MiddleCenter —— 余量**上下对半分**（这点用户早先纠正过我：
-	// "不能直接减算"）。所以要让底部多 12px，得把窗口高度加 **24**：
-	// 底部 +12、顶部也 +12（整窗高 24px）。
-	// 若只想要"底部多 12、顶部不动"，改的就不是这个数，而是 CreateLayoutGroup 的
-	// padding 底边（+24 会把整块内容上移 12、底部多 12）。这里先按"整窗长高"处理。
+	// 鍐呭瀹為珮 = 杈撳叆鍖?20 + 澹版槑鍖?320+8+24=352) + 鎸夐挳90 + 涓ゅ闂磋窛40 + 鍐呰竟璺?0 = 622锛?
+	// 鍔犳爣棰樻爮绾?65 鈫?742 鏃跺簳閮ㄧ暀鐧戒笌涓婁竴鐗?760/鍐呭640)涓€鑷淬€傝澧炲噺搴曢儴鐣欑櫧鐩存帴鏀硅繖涓暟銆?
+	// 銆?026-10-06 搴曢儴 +12 鍍忕礌銆戠敤鎴烽€愬儚绱犳暟鍑烘潵"搴曢儴宸?12 鍍忕礌"锛岃姹傝ˉ涓娿€?
+	// 澶栧眰甯冨眬鏄?childAlignment: MiddleCenter 鈥斺€?浣欓噺**涓婁笅瀵瑰崐鍒?*锛堣繖鐐圭敤鎴锋棭鍏堢籂姝ｈ繃鎴戯細
+	// "涓嶈兘鐩存帴鍑忕畻"锛夈€傛墍浠ヨ璁╁簳閮ㄥ 12px锛屽緱鎶婄獥鍙ｉ珮搴﹀姞 **24**锛?
+	// 搴曢儴 +12銆侀《閮ㄤ篃 +12锛堟暣绐楅珮 24px锛夈€?
+	// 鑻ュ彧鎯宠"搴曢儴澶?12銆侀《閮ㄤ笉鍔?锛屾敼鐨勫氨涓嶆槸杩欎釜鏁帮紝鑰屾槸 CreateLayoutGroup 鐨?
+	// padding 搴曡竟锛?24 浼氭妸鏁村潡鍐呭涓婄Щ 12銆佸簳閮ㄥ 12锛夈€傝繖閲屽厛鎸?鏁寸獥闀块珮"澶勭悊銆?
 	private static readonly Vector2Int windowSize = new Vector2Int(1000, 766);
 	private const int ContentWidth = 940;
 	private const int RowGap = 20;
@@ -44,9 +44,9 @@ public class JoinMenu : BasicMenu
 	private const int ButtonHeight = 90;
 	private const int StatementInnerPadding = 15;
 	private const int StatementExpandedHeight = 320;
-	// 状态行只有一行文字（字号 18，行高约 22）：给到 24 就是贴边，不再产生上下空白带
+	// 鐘舵€佽鍙湁涓€琛屾枃瀛楋紙瀛楀彿 18锛岃楂樼害 22锛夛細缁欏埌 24 灏辨槸璐磋竟锛屼笉鍐嶄骇鐢熶笂涓嬬┖鐧藉甫
 	private const int StatusHeight = 24;
-	// 地址栏只写 IP、没写端口时的默认端口
+	// 鍦板潃鏍忓彧鍐?IP銆佹病鍐欑鍙ｆ椂鐨勯粯璁ょ鍙?
 	private const int DefaultPort = 9806;
 	private const string Statement = @"STCH Studio Multiplayer Mod and Relay Server Statement
 
@@ -119,7 +119,7 @@ This multiplayer mod is released under the MIT License:
 1. License: MIT License
 2. License URL: https://opensource.org/licenses/MIT
 3. Source repository: https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer
-4. Copyright: Copyright © 2026 STCH Studio (Developer: maozhongmao / yangchengtong). All rights reserved.
+4. Copyright: Copyright 漏 2026 STCH Studio (Developer: maozhongmao / yangchengtong). All rights reserved.
 5. This mod is an independently rewritten implementation, not a copy or fork of any existing SFS multiplayer project. During reference and learning work, the Developer found prior reference projects unable to meet the required functionality and completely reworked the network transport, synchronization strategy, event handling, and architecture through multiple independent iterations: Net V1, TCP Net V2, and TCP V3. Any use, modification, or distribution must comply with the MIT License. STCH Studio retains independent copyright in its added code.
 
 STCH Studio (Developer: maozhongmao / yangchengtong)
@@ -135,14 +135,14 @@ Published: August 16, 2026";
 	private Color defaultTextInputColor;
 	private TextInput input_endpoint;
 	private TextInput input_username;
-	// 密码行常驻显示。不做「服务端要密码才自动出现」那套：多一条隐现逻辑就多一处
-	// 不确定性（标志位没传到就不显示，玩家根本没法输密码），而服务端不要密码时留空即可。
-	// 密码只留在内存里，不写 PlayerPrefs —— 参考文档把口令列入禁止持久化的内容。
+	// 瀵嗙爜琛屽父椹绘樉绀恒€備笉鍋氥€屾湇鍔＄瑕佸瘑鐮佹墠鑷姩鍑虹幇銆嶉偅濂楋細澶氫竴鏉￠殣鐜伴€昏緫灏卞涓€澶?
+	// 涓嶇‘瀹氭€э紙鏍囧織浣嶆病浼犲埌灏变笉鏄剧ず锛岀帺瀹舵牴鏈病娉曡緭瀵嗙爜锛夛紝鑰屾湇鍔＄涓嶈瀵嗙爜鏃剁暀绌哄嵆鍙€?
+	// 瀵嗙爜鍙暀鍦ㄥ唴瀛橀噷锛屼笉鍐?PlayerPrefs 鈥斺€?鍙傝€冩枃妗ｆ妸鍙ｄ护鍒楀叆绂佹鎸佷箙鍖栫殑鍐呭銆?
 	private Label label_password;
 	private TextInput input_password;
-	// 上次保存的地址原文（用户可能省略了端口），只用于回填输入框
+	// 涓婃淇濆瓨鐨勫湴鍧€鍘熸枃锛堢敤鎴峰彲鑳界渷鐣ヤ簡绔彛锛夛紝鍙敤浜庡洖濉緭鍏ユ
 	private string endpointInputText;
-	// 探测循环上次解析过的输入框内容，用来避免每秒重复解析同一个地址
+	// 鎺㈡祴寰幆涓婃瑙ｆ瀽杩囩殑杈撳叆妗嗗唴瀹癸紝鐢ㄦ潵閬垮厤姣忕閲嶅瑙ｆ瀽鍚屼竴涓湴鍧€
 	private string probedEndpointText;
 	private SFS.UI.ModGUI.Button agreeButton;
 	private ScrollElement statementScroll;
@@ -154,7 +154,7 @@ Published: August 16, 2026";
 	private int serverInfoGeneration;
 	private bool joinAllowedByStatus = true;
 
-	// 声明窗标题随接受状态变化。全英文：SFS 不支持中文，中文会渲染成方框。
+	// 澹版槑绐楁爣棰橀殢鎺ュ彈鐘舵€佸彉鍖栥€傚叏鑻辨枃锛歋FS 涓嶆敮鎸佷腑鏂囷紝涓枃浼氭覆鏌撴垚鏂规銆?
 	private string statementWindowTitle => statementRead
 		? "User Statement (accepted)"
 		: "User Statement (read to the end)";
@@ -187,7 +187,7 @@ Published: August 16, 2026";
 		string username = PlayerPrefs.GetString(LastUsernameKey, string.Empty);
 		if (endpoint.Length > 0)
 		{
-			// 端口可省：没写按默认端口算；写了就必须是合法端口，否则整条不认
+			// 绔彛鍙渷锛氭病鍐欐寜榛樿绔彛绠楋紱鍐欎簡灏卞繀椤绘槸鍚堟硶绔彛锛屽惁鍒欐暣鏉′笉璁?
 			int separator = endpoint.LastIndexOf(':');
 			string host = endpoint;
 			int port = DefaultPort;
@@ -200,10 +200,10 @@ Published: August 16, 2026";
 			}
 			if (parsed)
 			{
-				// 回填一律用原文。以前只在 IPAddress.TryParse 成功时才回填，结果存了域名的玩家
-				// 重开菜单会被静默换成默认的 127.0.0.1:9806 —— 域名在解析器眼里"不算地址"。
+				// 鍥炲～涓€寰嬬敤鍘熸枃銆備互鍓嶅彧鍦?IPAddress.TryParse 鎴愬姛鏃舵墠鍥炲～锛岀粨鏋滃瓨浜嗗煙鍚嶇殑鐜╁
+				// 閲嶅紑鑿滃崟浼氳闈欓粯鎹㈡垚榛樿鐨?127.0.0.1:9806 鈥斺€?鍩熷悕鍦ㄨВ鏋愬櫒鐪奸噷"涓嶇畻鍦板潃"銆?
 				endpointInputText = endpoint;
-				// 只有 IP 字面量能在这里同步填进 joinInfo；域名要等异步解析（探测循环每轮会补）
+				// 鍙湁 IP 瀛楅潰閲忚兘鍦ㄨ繖閲屽悓姝ュ～杩?joinInfo锛涘煙鍚嶈绛夊紓姝ヨВ鏋愶紙鎺㈡祴寰幆姣忚疆浼氳ˉ锛?
 				if (IPAddress.TryParse(host, out IPAddress address))
 				{
 					joinInfo.address = address;
@@ -241,10 +241,10 @@ Published: August 16, 2026";
 		input_endpoint = Builder.CreateTextInput(inputColumn, InputWidth, RowHeight, 0, 0,
 			endpointInputText ?? (joinInfo.address + ":" + joinInfo.port), async delegate(string input)
 		{
-			// 空框是"还没填"的正常状态，不标红；只有非空却解析不出地址时才标红
-			input_endpoint.FieldColor = string.IsNullOrWhiteSpace(input) || await TryParseEndpoint(input, joinInfo)
-				? defaultTextInputColor
-				: Color.red;
+			// 绾㈣壊鍙〃绀衡€滆繖涓瓧绗︿覆涓嶆槸鍚堟硶鍦板潃鍐欐硶鈥濓紱DNS 鏆傛椂澶辫触涓嶈兘鎶婂悎娉曞煙鍚嶆爣绾€?
+			bool syntaxOk = IsEndpointSyntaxValid(input);
+			input_endpoint.FieldColor = syntaxOk ? defaultTextInputColor : Color.red;
+			if (syntaxOk) await TryParseEndpoint(input, joinInfo);
 		});
 		defaultTextInputColor = input_endpoint.FieldColor;
 
@@ -252,23 +252,25 @@ Published: August 16, 2026";
 		input_username = Builder.CreateTextInput(inputColumn, InputWidth, RowHeight, 0, 0, joinInfo.username, delegate(string input)
 		{
 			input_username.Text = joinInfo.username = input.Trim();
-			input_username.FieldColor = defaultTextInputColor;
+			// PC 绔彧鏀寔 ASCII锛氫腑鏂?闈炶嫳鏂囦細娓叉煋鎴愭柟妗嗐€傛闄愬埗浠?PC 绔湁锛孉ndroid 涓嶈蛋杩欏杈撳叆妗嗐€?
+			input_username.FieldColor = IsAsciiOnly(input) ? defaultTextInputColor : Color.red;
 		});
 
-		// 密码行常驻。窗口尺寸不动：底部本来就留有余量，多这一行正好落在那块留白里，
-		// 不要再去压缩声明区 —— 那样留白还在、声明区反而变矮，布局就难看了。
-		// 密码不做 Trim：口令里的空格可能是有效字符。
+		// 瀵嗙爜琛屽父椹汇€傜獥鍙ｅ昂瀵镐笉鍔細搴曢儴鏈潵灏辩暀鏈変綑閲忥紝澶氳繖涓€琛屾濂借惤鍦ㄩ偅鍧楃暀鐧介噷锛?
+		// 涓嶈鍐嶅幓鍘嬬缉澹版槑鍖?鈥斺€?閭ｆ牱鐣欑櫧杩樺湪銆佸０鏄庡尯鍙嶈€屽彉鐭紝甯冨眬灏遍毦鐪嬩簡銆?
+		// 瀵嗙爜涓嶅仛 Trim锛氬彛浠ら噷鐨勭┖鏍煎彲鑳芥槸鏈夋晥瀛楃銆?
 		label_password = Builder.CreateLabel(labelColumn, LabelWidth, RowHeight, 0, 0, "Password");
 		label_password.TextAlignment = TextAlignmentOptions.MidlineLeft;
 		input_password = Builder.CreateTextInput(inputColumn, InputWidth, RowHeight, 0, 0, joinInfo.password, delegate(string input)
 		{
 			input_password.Text = joinInfo.password = input;
-			input_password.FieldColor = defaultTextInputColor;
+			// 鍚屼笂锛歅C 绔彧鏀寔 ASCII锛岄潪鑻辨枃浼氭樉绀烘柟妗嗭紱Android 鏃犳杈撳叆鏈哄埗銆?
+			input_password.FieldColor = IsAsciiOnly(input) ? defaultTextInputColor : Color.red;
 		});
 		statementArea = Builder.CreateContainer(window);
 		statementArea.CreateLayoutGroup(SFS.UI.ModGUI.Type.Vertical, childAlignment: TextAnchor.MiddleCenter, spacing: 8f, padding: new RectOffset(0, 0, 0, 0), disableChildSizeControl: true);
-		// 接受状态并进声明窗标题（原来是窗上方单独一行，白占一截高度）。
-		// 文案保持英文：SFS 不支持中文，中文会渲染成方框。
+		// 鎺ュ彈鐘舵€佸苟杩涘０鏄庣獥鏍囬锛堝師鏉ユ槸绐椾笂鏂瑰崟鐙竴琛岋紝鐧藉崰涓€鎴珮搴︼級銆?
+		// 鏂囨淇濇寔鑻辨枃锛歋FS 涓嶆敮鎸佷腑鏂囷紝涓枃浼氭覆鏌撴垚鏂规銆?
 		statementWindow = UIToolsBuilder.CreateClosableWindow(statementArea, Builder.GetRandomID(), ContentWidth, StatementExpandedHeight, 0, 0, draggable: false, savePosition: false, opacity: 0.45f, titleText: statementWindowTitle, minimized: false);
 		statementWindow.CreateLayoutGroup(SFS.UI.ModGUI.Type.Vertical, childAlignment: TextAnchor.UpperLeft, spacing: 8f, padding: new RectOffset(StatementInnerPadding, StatementInnerPadding, StatementInnerPadding, StatementInnerPadding), disableChildSizeControl: true);
 		statementWindow.EnableScrolling(SFS.UI.ModGUI.Type.Vertical);
@@ -284,8 +286,8 @@ Published: August 16, 2026";
 		statementLabel.gameObject.AddComponent<UnityEngine.UI.ContentSizeFitter>().verticalFit = UnityEngine.UI.ContentSizeFitter.FitMode.PreferredSize;
 		Builder.CreateSpace(statementWindow, ContentWidth - StatementInnerPadding * 2, 48);
 
-		// 状态行塞进声明区里（原来它是 window 的独立子项，上下各吃一次 RowGap=20，
-		// 等于凭空多出两截空白）。现在声明→8→状态行→20→按钮，只留按钮与须知之间那一份留白。
+		// 鐘舵€佽濉炶繘澹版槑鍖洪噷锛堝師鏉ュ畠鏄?window 鐨勭嫭绔嬪瓙椤癸紝涓婁笅鍚勫悆涓€娆?RowGap=20锛?
+		// 绛変簬鍑┖澶氬嚭涓ゆ埅绌虹櫧锛夈€傜幇鍦ㄥ０鏄庘啋8鈫掔姸鎬佽鈫?0鈫掓寜閽紝鍙暀鎸夐挳涓庨』鐭ヤ箣闂撮偅涓€浠界暀鐧姐€?
 		statusLabel = Builder.CreateLabel(statementArea, ContentWidth, StatusHeight, 0, 0, "Server status unavailable.");
 		statusLabel.AutoFontResize = false;
 		statusLabel.FontSize = 18f;
@@ -310,7 +312,7 @@ Published: August 16, 2026";
 		public int HandshakeVersion;
 		public int ProtocolVersion;
 		public string ServerVersion = string.Empty;
-		// 版本帧尾部的可选 flags：bit0 = 服务端要求密码。旧服务端不发，读到就是 0。
+		// 鐗堟湰甯у熬閮ㄧ殑鍙€?flags锛歜it0 = 鏈嶅姟绔姹傚瘑鐮併€傛棫鏈嶅姟绔笉鍙戯紝璇诲埌灏辨槸 0銆?
 		public int Flags;
 		public bool PasswordRequired => (Flags & ServerVersionCodec.ServerPolicyFlagPasswordRequired) != 0;
 	}
@@ -319,8 +321,8 @@ Published: August 16, 2026";
 	{
 		while (generation == serverInfoGeneration && windowHolder != null)
 		{
-			// 每轮按输入框当前内容重新解析。TextInput 的值回调不一定每次按键都触发，
-			// 只靠回调会让探测一直打在上一次的旧地址上（面板永远 unreachable，但点 Join 能连上）。
+			// 姣忚疆鎸夎緭鍏ユ褰撳墠鍐呭閲嶆柊瑙ｆ瀽銆俆extInput 鐨勫€煎洖璋冧笉涓€瀹氭瘡娆℃寜閿兘瑙﹀彂锛?
+			// 鍙潬鍥炶皟浼氳鎺㈡祴涓€鐩存墦鍦ㄤ笂涓€娆＄殑鏃у湴鍧€涓婏紙闈㈡澘姘歌繙 unreachable锛屼絾鐐?Join 鑳借繛涓婏級銆?
 			if (input_endpoint != null && input_endpoint.gameObject != null)
 			{
 				string text = input_endpoint.Text;
@@ -353,20 +355,23 @@ Published: August 16, 2026";
 		string reason = null;
 		if (status.Reachable && status.VersionKnown)
 		{
-			compatible = ServerVersionCodec.IsCompatible(status.HandshakeVersion, status.ServerVersion,
+			// 鐗堟湰瀛楃涓插彧鐢ㄤ簬灞曠ず锛涘悇缁勪欢杩樻病缁熶竴鎵撳寘锛屼笉鑳藉洜 V2.1/V1.4 宸紓闃绘鍔犲叆銆?
+			// 鐪熸鐨勭‖闂ㄦ鏄彙鎵嬬増鏈€?
+			ServerVersionCodec.IsCompatible(status.HandshakeVersion, status.ServerVersion,
 				SessionHandshakeCodec.Version, Main.ModVersionInfo.Version, out reason);
+			compatible = status.HandshakeVersion == SessionHandshakeCodec.Version;
 		}
 
 		joinAllowedByStatus = compatible;
-		// 状态行平时只有一行（高 24）；带拒绝原因时是两行，不放宽会把原因截掉。
+		// 鐘舵€佽骞虫椂鍙湁涓€琛岋紙楂?24锛夛紱甯︽嫆缁濆師鍥犳椂鏄袱琛岋紝涓嶆斁瀹戒細鎶婂師鍥犳埅鎺夈€?
 		//
-		// 【底部为什么会差 12 像素】外层 window 的布局是 childAlignment: MiddleCenter ——
-		// 多出来的余量**上下对半分**。状态行从 24 变成 48 会让声明区高 24，
-		// 于是底部留白正好少 12。这就是"登录页底部差 12 像素"的来源（用户逐像素数出来的）。
+		// 銆愬簳閮ㄤ负浠€涔堜細宸?12 鍍忕礌銆戝灞?window 鐨勫竷灞€鏄?childAlignment: MiddleCenter 鈥斺€?
+		// 澶氬嚭鏉ョ殑浣欓噺**涓婁笅瀵瑰崐鍒?*銆傜姸鎬佽浠?24 鍙樻垚 48 浼氳澹版槑鍖洪珮 24锛?
+		// 浜庢槸搴曢儴鐣欑櫧姝ｅソ灏?12銆傝繖灏辨槸"鐧诲綍椤靛簳閮ㄥ樊 12 鍍忕礌"鐨勬潵婧愶紙鐢ㄦ埛閫愬儚绱犳暟鍑烘潵鐨勶級銆?
 		//
-		// 根治办法：让「声明窗 + 状态行」这一段**总高恒定** —— 状态行长高多少，声明窗就矮多少
-		// （声明窗本来就可滚动，少 24px 不影响可读性）。这样底部留白永远是 25px，不再跳。
-		// 注意不能反过来改 windowSize：MiddleCenter 下改它 1px 只挪 0.5px，算不准。
+		// 鏍规不鍔炴硶锛氳銆屽０鏄庣獥 + 鐘舵€佽銆嶈繖涓€娈?*鎬婚珮鎭掑畾** 鈥斺€?鐘舵€佽闀块珮澶氬皯锛屽０鏄庣獥灏辩煯澶氬皯
+		// 锛堝０鏄庣獥鏈潵灏卞彲婊氬姩锛屽皯 24px 涓嶅奖鍝嶅彲璇绘€э級銆傝繖鏍峰簳閮ㄧ暀鐧芥案杩滄槸 25px锛屼笉鍐嶈烦銆?
+		// 娉ㄦ剰涓嶈兘鍙嶈繃鏉ユ敼 windowSize锛歁iddleCenter 涓嬫敼瀹?1px 鍙尓 0.5px锛岀畻涓嶅噯銆?
 		if (statusLabel != null && statusLabel.gameObject != null)
 		{
 			int statusHeight = reason == null ? StatusHeight : StatusHeight * 2;
@@ -377,9 +382,9 @@ Published: August 16, 2026";
 					ContentWidth, StatementExpandedHeight - (statusHeight - StatusHeight));
 			}
 		}
-		// 三组数据横向排一行：竖着摆三行会把窗口高度吃满，按钮被顶出可视区。
-		// 版本不匹配的原因（reason）仍另起一行，只在真出问题时占第二行。
-		// 服务端在版本帧的 flags 里说明要不要密码时，只在状态行加一句提示 —— 不改布局。
+		// 涓夌粍鏁版嵁妯悜鎺掍竴琛岋細绔栫潃鎽嗕笁琛屼細鎶婄獥鍙ｉ珮搴﹀悆婊★紝鎸夐挳琚《鍑哄彲瑙嗗尯銆?
+		// 鐗堟湰涓嶅尮閰嶇殑鍘熷洜锛坮eason锛変粛鍙﹁捣涓€琛岋紝鍙湪鐪熷嚭闂鏃跺崰绗簩琛屻€?
+		// 鏈嶅姟绔湪鐗堟湰甯х殑 flags 閲岃鏄庤涓嶈瀵嗙爜鏃讹紝鍙湪鐘舵€佽鍔犱竴鍙ユ彁绀?鈥斺€?涓嶆敼甯冨眬銆?
 		statusLabel.Text = serverLine
 			+ (status.PasswordRequired ? "   Password: required" : string.Empty)
 			+ "   " + clientLine + "   " + metricsLine
@@ -397,23 +402,34 @@ Published: August 16, 2026";
 			: (statementRead ? "Join Server" : "Read to the end to continue");
 	}
 
-	// 探针会话标识：每次递增，绝不复用（原因见 QueryServerStatusAsync 里的注释）。
+	// 鎺㈤拡浼氳瘽鏍囪瘑锛氭瘡娆￠€掑锛岀粷涓嶅鐢紙鍘熷洜瑙?QueryServerStatusAsync 閲岀殑娉ㄩ噴锛夈€?
 	private static int probeConvCounter = 0x53465349;
 	private static uint NextProbeConv() =>
 		(uint)System.Threading.Interlocked.Increment(ref probeConvCounter);
 
-	// UdpClient(AddressFamily) 建出来的是未绑定 socket，对它调 ReceiveAsync 会抛
-	// "在执行此操作前必须先调用 Bind 方法"。传输层、P2P 通道都踩过这个坑，这里统一显式绑定。
+	// UdpClient(AddressFamily) 寤哄嚭鏉ョ殑鏄湭缁戝畾 socket锛屽瀹冭皟 ReceiveAsync 浼氭姏
+	// "鍦ㄦ墽琛屾鎿嶄綔鍓嶅繀椤诲厛璋冪敤 Bind 鏂规硶"銆備紶杈撳眰銆丳2P 閫氶亾閮借俯杩囪繖涓潙锛岃繖閲岀粺涓€鏄惧紡缁戝畾銆?
 	private static UdpClient CreateBoundUdp(AddressFamily family)
 	{
 		var client = new UdpClient(family);
 		client.Client.Bind(new IPEndPoint(
 			family == AddressFamily.InterNetworkV6 ? IPAddress.IPv6Any : IPAddress.Any, 0));
 		MultiplayerSFS.Common.UdpSocketGuard.DisableConnReset(client);
-		// 探测也走同一套缓冲设置：登录页每秒一次探测，缓冲太小同样会被内核丢包。
+		// 鎺㈡祴涔熻蛋鍚屼竴濂楃紦鍐茶缃細鐧诲綍椤垫瘡绉掍竴娆℃帰娴嬶紝缂撳啿澶皬鍚屾牱浼氳鍐呮牳涓㈠寘銆?
 		client.Client.ReceiveBufferSize = 1 << 20;
 		client.Client.SendBufferSize = 1 << 20;
 		return client;
+	}
+
+	private static byte[] WrapKcpMessage(byte[] frameData)
+	{
+		byte[] message = new byte[4 + frameData.Length];
+		message[0] = (byte)frameData.Length;
+		message[1] = (byte)(frameData.Length >> 8);
+		message[2] = (byte)(frameData.Length >> 16);
+		message[3] = (byte)(frameData.Length >> 24);
+		Buffer.BlockCopy(frameData, 0, message, 4, frameData.Length);
+		return message;
 	}
 
 	private static async Task<ServerStatus> QueryServerStatusAsync(IPAddress address, int port)
@@ -424,27 +440,28 @@ Published: August 16, 2026";
 		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 		try
 		{
-			// 【必须每次换 conv】以前固定 0x53465349：上一次探针的迟到重传会落进下一次的新会话
-			// （服务端按 conv 认会话，同一 conv 换源端口就重建），段序号空间一混，服务端就
-			// "TCP frame kind is invalid" 并踢掉会话 —— 线上日志里这条刷了 3832 次。
+			// 銆愬繀椤绘瘡娆℃崲 conv銆戜互鍓嶅浐瀹?0x53465349锛氫笂涓€娆℃帰閽堢殑杩熷埌閲嶄紶浼氳惤杩涗笅涓€娆＄殑鏂颁細璇?
+			// 锛堟湇鍔＄鎸?conv 璁や細璇濓紝鍚屼竴 conv 鎹㈡簮绔彛灏遍噸寤猴級锛屾搴忓彿绌洪棿涓€娣凤紝鏈嶅姟绔氨
+			// "TCP frame kind is invalid" 骞惰涪鎺変細璇?鈥斺€?绾夸笂鏃ュ織閲岃繖鏉″埛浜?3832 娆°€?
 			uint conv = NextProbeConv();
 			using (var udp = CreateBoundUdp(address.AddressFamily))
 			using (var cancellation = new System.Threading.CancellationTokenSource(3000))
 			using (var kcp = new KcpContext(conv, (data, _) => udp.Send(data, data.Length, new IPEndPoint(address, port))))
 			{
-				// 预设集中在 Common/KcpTransportPresets（连接前探针也用同一套，避免各处参数漂移）。
+				// 棰勮闆嗕腑鍦?Common/KcpTransportPresets锛堣繛鎺ュ墠鎺㈤拡涔熺敤鍚屼竴濂楋紝閬垮厤鍚勫鍙傛暟婕傜Щ锛夈€?
 				MultiplayerSFS.Common.KcpTransportPresets.Apply(kcp, MultiplayerSFS.Common.KcpTransportPresets.Relay);
-				byte[] infoRequest = TcpFrameCodec.Encode(new TcpFrame(TcpFrameKind.ServerInfoRequest, 0, ServerInfoCodec.EncodeRequest(), 0));
-				byte[] versionRequest = TcpFrameCodec.Encode(new TcpFrame(TcpFrameKind.ServerVersionRequest, 0, ServerVersionCodec.EncodeRequest(), 0));
+				byte[] infoRequest = WrapKcpMessage(TcpFrameCodec.Encode(new TcpFrame(TcpFrameKind.ServerInfoRequest, 0, ServerInfoCodec.EncodeRequest(), 0)));
+				byte[] versionRequest = WrapKcpMessage(TcpFrameCodec.Encode(new TcpFrame(TcpFrameKind.ServerVersionRequest, 0, ServerVersionCodec.EncodeRequest(), 0)));
 				kcp.Send(infoRequest, 0, infoRequest.Length);
 				kcp.Send(versionRequest, 0, versionRequest.Length);
 				kcp.Flush();
+				UnityEngine.Debug.Log("[SFS-MP][probe] sent info=" + infoRequest.Length + " version=" + versionRequest.Length);
 
 				var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(3);
 				DateTime countsArrivedAt = DateTime.MinValue;
 				while (DateTime.UtcNow < deadline)
 				{
-					// 旧服务端不认 ServerVersionRequest：人数到手后再等 700ms 就收工，别每次都拖满 3 秒。
+					// 鏃ф湇鍔＄涓嶈 ServerVersionRequest锛氫汉鏁板埌鎵嬪悗鍐嶇瓑 700ms 灏辨敹宸ワ紝鍒瘡娆￠兘鎷栨弧 3 绉掋€?
 					if (status.Reachable && !status.VersionKnown && DateTime.UtcNow > countsArrivedAt + TimeSpan.FromMilliseconds(700)) break;
 
 					kcp.Update((uint)Environment.TickCount);
@@ -453,14 +470,21 @@ Published: August 16, 2026";
 					if (completed == receive)
 					{
 						UdpReceiveResult datagram = await receive.ConfigureAwait(false);
+						UnityEngine.Debug.Log("[SFS-MP][probe] udp rx=" + datagram.Buffer.Length);
 						kcp.Input(datagram.Buffer, 0, datagram.Buffer.Length);
 						byte[] buffer = new byte[4096];
 						int length;
 						while ((length = kcp.Recv(buffer, 0, buffer.Length)) > 0)
 						{
-							byte[] body = new byte[length];
-							Buffer.BlockCopy(buffer, 0, body, 0, length);
-							TcpFrame frame = TcpFrameCodec.DecodeBody(body);
+							UnityEngine.Debug.Log("[SFS-MP][probe] kcp rx=" + length);
+							if (length < 8) throw new InvalidDataException("probe response too short");
+							int outer = buffer[0] | (buffer[1] << 8) | (buffer[2] << 16) | (buffer[3] << 24);
+							int bodyLength = buffer[4] | (buffer[5] << 8) | (buffer[6] << 16) | (buffer[7] << 24);
+							if (outer + 4 != length || bodyLength < 9 || bodyLength + 4 != outer)
+								throw new InvalidDataException("invalid KCP probe framing");
+							byte[] frameBody = new byte[bodyLength];
+							Buffer.BlockCopy(buffer, 8, frameBody, 0, bodyLength);
+							TcpFrame frame = TcpFrameCodec.DecodeBody(frameBody);
 							if (frame.Kind == TcpFrameKind.ServerInfoResponse)
 							{
 								var counts = ServerInfoCodec.DecodeResponse(frame.Payload);
@@ -486,8 +510,9 @@ Published: August 16, 2026";
 				}
 			}
 		}
-		catch
+		catch (System.Exception ex)
 		{
+			UnityEngine.Debug.LogWarning("[SFS-MP][probe] " + ex.GetType().Name + ": " + ex.Message);
 			status.Reachable = false;
 		}
 		return status;
@@ -531,23 +556,23 @@ Published: August 16, 2026";
 		{
 			input_endpoint.FieldColor = defaultTextInputColor;
 			input_username.FieldColor = defaultTextInputColor;
-			// 密码同样直接取输入框当前值，不依赖 onChange 回调（回调可能落后一次输入）
+			// 瀵嗙爜鍚屾牱鐩存帴鍙栬緭鍏ユ褰撳墠鍊硷紝涓嶄緷璧?onChange 鍥炶皟锛堝洖璋冨彲鑳借惤鍚庝竴娆¤緭鍏ワ級
 			if (input_password != null && input_password.gameObject != null)
 			{
 				input_password.FieldColor = defaultTextInputColor;
 				joinInfo.password = input_password.Text ?? string.Empty;
 			}
 
-			// 点 Join 就先落盘，不等校验和连接结果：地址能解析就存地址，用户名非空就存用户名。
-			// 以前是"地址+用户名都过关"才存 —— 用户名空着时新填的地址会丢，下次进菜单看到的是旧地址。
-			// 用户名同样直接取输入框当前值，不依赖回调 —— 否则可能拿上一次的旧名字去连
+			// 鐐?Join 灏卞厛钀界洏锛屼笉绛夋牎楠屽拰杩炴帴缁撴灉锛氬湴鍧€鑳借В鏋愬氨瀛樺湴鍧€锛岀敤鎴峰悕闈炵┖灏卞瓨鐢ㄦ埛鍚嶃€?
+			// 浠ュ墠鏄?鍦板潃+鐢ㄦ埛鍚嶉兘杩囧叧"鎵嶅瓨 鈥斺€?鐢ㄦ埛鍚嶇┖鐫€鏃舵柊濉殑鍦板潃浼氫涪锛屼笅娆¤繘鑿滃崟鐪嬪埌鐨勬槸鏃у湴鍧€銆?
+			// 鐢ㄦ埛鍚嶅悓鏍风洿鎺ュ彇杈撳叆妗嗗綋鍓嶅€硷紝涓嶄緷璧栧洖璋?鈥斺€?鍚﹀垯鍙兘鎷夸笂涓€娆＄殑鏃у悕瀛楀幓杩?
 			string usernameText = (input_username.Text ?? string.Empty).Trim();
 			if (usernameText.Length > 0) joinInfo.username = usernameText;
 
 			bool endpointOk = await TryParseEndpoint(input_endpoint.Text, joinInfo);
 			if (endpointOk)
 			{
-				// 存原文：用户省略端口时连接按 9806 算，但下次打开框里还是他打的那样
+				// 瀛樺師鏂囷細鐢ㄦ埛鐪佺暐绔彛鏃惰繛鎺ユ寜 9806 绠楋紝浣嗕笅娆℃墦寮€妗嗛噷杩樻槸浠栨墦鐨勯偅鏍?
 				PlayerPrefs.SetString(LastServerKey, input_endpoint.Text.Trim());
 				if (usernameText.Length > 0) PlayerPrefs.SetString(LastUsernameKey, usernameText);
 				PlayerPrefs.Save();
@@ -555,31 +580,76 @@ Published: August 16, 2026";
 
 			if (string.IsNullOrWhiteSpace(input_endpoint.Text))
 			{
-				// 空着就空着，不标红（可能是还没填），只留一句提示
-				MsgDrawer.main.Log("Enter the server IP address.");
+				// 绌虹潃灏辩┖鐫€锛屼笉鏍囩孩锛堝彲鑳芥槸杩樻病濉級锛屽彧鐣欎竴鍙ユ彁绀?
+				MsgDrawer.main?.Log("Enter the server IP address.");
 			}
 			else if (!endpointOk)
 			{
 				input_endpoint.FieldColor = Color.red;
-				MsgDrawer.main.Log("Server must use IP:Port");
+				MsgDrawer.main?.Log("Server must use IP:Port");
 			}
 			else if (string.IsNullOrWhiteSpace(input_username.Text))
 			{
 				input_username.FieldColor = Color.red;
-				MsgDrawer.main.Log("Username cannot be empty");
+				MsgDrawer.main?.Log("Username cannot be empty");
 			}
 			else
 			{
-				MsgDrawer.main.Log("Attempting to connect...");
+				MsgDrawer.main?.Log("Attempting to connect...");
 				await ClientManager.TryConnect(joinInfo);
 			}
 		}
 		catch (Exception ex)
 		{
 			string message = string.IsNullOrWhiteSpace(ex.Message) ? "Connection failed." : ex.Message;
-			MsgDrawer.main.Log(message);
+			MsgDrawer.main?.Log(message);
 			Debug.LogError(ex);
 		}
+	}
+
+	// PC 绔緭鍏ュ彧鏀寔 ASCII锛氶潪鑻辨枃浼氬湪娓告垙瀛椾綋閲屾樉绀烘垚鏂规銆?
+	// 浠?PC 绔湁杩欎釜闄愬埗锛汚ndroid 娌℃湁杩欏杈撳叆妗嗭紝涔熶笉鎷︽埅鐜╁鍚?瀵嗙爜銆?
+	private static bool IsAsciiOnly(string input)
+	{
+		if (string.IsNullOrEmpty(input)) return true;
+		foreach (char c in input)
+			if (c < 0x20 || c > 0x7E) return false;
+		return true;
+	}
+
+	private static bool IsEndpointSyntaxValid(string input)
+	{
+		string text = input == null ? string.Empty : input.Trim();
+		if (text.Length == 0) return false;
+		foreach (char c in text) if (char.IsWhiteSpace(c)) return false;
+		if (text[0] == '[')
+		{
+			int close = text.IndexOf(']');
+			if (close < 2) return false;
+			string ipv6 = text.Substring(1, close - 1);
+			if (!IPAddress.TryParse(ipv6, out _)) return false;
+			string rest = text.Substring(close + 1);
+			if (rest.Length == 0) return true;
+			return rest[0] == ':' && IsValidPort(rest.Substring(1));
+		}
+		if (IPAddress.TryParse(text, out _)) return true;
+		string host = text;
+		int separator = text.LastIndexOf(':');
+		if (separator >= 0)
+		{
+			if (separator == 0 || separator == text.Length - 1) return false;
+			if (!IsValidPort(text.Substring(separator + 1))) return false;
+			host = text.Substring(0, separator);
+		}
+		if (host.Length == 0) return false;
+		foreach (char c in host)
+			if (!(char.IsLetterOrDigit(c) || c == '.' || c == '-' || c == '_')) return false;
+		return true;
+	}
+
+	private static bool IsValidPort(string text)
+	{
+		return int.TryParse(text, out int port) && port >= 1 && port <= 65535;
 	}
 
 	private static async Task<bool> TryParseEndpoint(string input, JoinInfo info)
@@ -587,15 +657,15 @@ Published: August 16, 2026";
 		string text = input == null ? string.Empty : input.Trim();
 		if (text.Length == 0) return false;
 
-		// 连接串的三种写法都要认（IPv6 必须单独处理，见下）：
-		//   1.2.3.4:9806 / example.com:9806   域名或 IPv4 + 端口
-		//   1.2.3.4 / example.com             省略端口 -> 默认端口 + SRV 查询
-		//   [240e:3bd::6173]:9806             带方括号的 IPv6 + 端口（唯一无歧义的写法）
-		//   240e:3bd::6173                    裸 IPv6 字面量（默认端口）
+		// 杩炴帴涓茬殑涓夌鍐欐硶閮借璁わ紙IPv6 蹇呴』鍗曠嫭澶勭悊锛岃涓嬶級锛?
+		//   1.2.3.4:9806 / example.com:9806   鍩熷悕鎴?IPv4 + 绔彛
+		//   1.2.3.4 / example.com             鐪佺暐绔彛 -> 榛樿绔彛 + SRV 鏌ヨ
+		//   [240e:3bd::6173]:9806             甯︽柟鎷彿鐨?IPv6 + 绔彛锛堝敮涓€鏃犳涔夌殑鍐欐硶锛?
+		//   240e:3bd::6173                    瑁?IPv6 瀛楅潰閲忥紙榛樿绔彛锛?
 		//
-		// 【为什么必须特判】IPv6 字面量里全是冒号。按"最后一个冒号"切端口时，
-		// `240e:3bd:231:...:6173` 会被切成主机 `240e:3bd:231:...:5d0c` + 端口 `6173`
-		// —— 端口恰好合法，于是不报错，只是地址被切坏，最后表现为"地址无效"，很难查。
+		// 銆愪负浠€涔堝繀椤荤壒鍒ゃ€慖Pv6 瀛楅潰閲忛噷鍏ㄦ槸鍐掑彿銆傛寜"鏈€鍚庝竴涓啋鍙?鍒囩鍙ｆ椂锛?
+		// `240e:3bd:231:...:6173` 浼氳鍒囨垚涓绘満 `240e:3bd:231:...:5d0c` + 绔彛 `6173`
+		// 鈥斺€?绔彛鎭板ソ鍚堟硶锛屼簬鏄笉鎶ラ敊锛屽彧鏄湴鍧€琚垏鍧忥紝鏈€鍚庤〃鐜颁负"鍦板潃鏃犳晥"锛屽緢闅炬煡銆?
 		int port = DefaultPort;
 		bool portSpecified = false;
 		string host = text;
@@ -615,7 +685,7 @@ Published: August 16, 2026";
 		}
 		else if (IPAddress.TryParse(text, out _))
 		{
-			// 整串就是一个地址（IPv4 或裸 IPv6）：不做端口切分。
+			// 鏁翠覆灏辨槸涓€涓湴鍧€锛圛Pv4 鎴栬８ IPv6锛夛細涓嶅仛绔彛鍒囧垎銆?
 			host = text;
 		}
 		else
@@ -631,8 +701,8 @@ Published: August 16, 2026";
 		}
 		IPAddress address = await TryParseAddress(host);
 		if (address == null) return false;
-		// 没写端口才去问 SRV：域名背后的公网端口未必等于服务端监听的 9806
-		// （内网穿透只给 ≥10000 的端口）。显式端口永远优先，不走这条路。
+		// 娌″啓绔彛鎵嶅幓闂?SRV锛氬煙鍚嶈儗鍚庣殑鍏綉绔彛鏈繀绛変簬鏈嶅姟绔洃鍚殑 9806
+		// 锛堝唴缃戠┛閫忓彧缁?鈮?0000 鐨勭鍙ｏ級銆傛樉寮忕鍙ｆ案杩滀紭鍏堬紝涓嶈蛋杩欐潯璺€?
 		if (!portSpecified)
 		{
 			int? srvPort = await SrvPortLookup.QueryAsync(host);
@@ -651,9 +721,9 @@ Published: August 16, 2026";
 			IPAddress[] all = await Dns.GetHostAddressesAsync(input);
 			if (all == null || all.Length == 0) return null;
 
-			// 域名可能同时有 A 和 AAAA，而 GetHostAddresses 的顺序没有保证。
-			// 本套部署是"域名只挂 AAAA 指向目标设备"，所以有可用的 IPv6 时优先走 IPv6；
-			// 但本机没有 IPv6 出口时优先它只会白等一个超时，所以那时退回 IPv4。
+			// 鍩熷悕鍙兘鍚屾椂鏈?A 鍜?AAAA锛岃€?GetHostAddresses 鐨勯『搴忔病鏈変繚璇併€?
+			// 鏈閮ㄧ讲鏄?鍩熷悕鍙寕 AAAA 鎸囧悜鐩爣璁惧"锛屾墍浠ユ湁鍙敤鐨?IPv6 鏃朵紭鍏堣蛋 IPv6锛?
+			// 浣嗘湰鏈烘病鏈?IPv6 鍑哄彛鏃朵紭鍏堝畠鍙細鐧界瓑涓€涓秴鏃讹紝鎵€浠ラ偅鏃堕€€鍥?IPv4銆?
 			if (HasUsableIPv6())
 			{
 				foreach (IPAddress candidate in all)
@@ -675,9 +745,9 @@ Published: August 16, 2026";
 		}
 	}
 
-	// 本机是否有"真能用"的 IPv6：存在一张已启用、非回环/非隧道网卡上的
-	// 非 link-local、非 site-local 的 IPv6 单播地址。
-	// 用它是为了避免"域名有 AAAA 但本机根本没 IPv6"时白等一整个连接超时。
+	// 鏈満鏄惁鏈?鐪熻兘鐢?鐨?IPv6锛氬瓨鍦ㄤ竴寮犲凡鍚敤銆侀潪鍥炵幆/闈為毀閬撶綉鍗′笂鐨?
+	// 闈?link-local銆侀潪 site-local 鐨?IPv6 鍗曟挱鍦板潃銆?
+	// 鐢ㄥ畠鏄负浜嗛伩鍏?鍩熷悕鏈?AAAA 浣嗘湰鏈烘牴鏈病 IPv6"鏃剁櫧绛変竴鏁翠釜杩炴帴瓒呮椂銆?
 	private static bool HasUsableIPv6()
 	{
 		try
@@ -698,8 +768,9 @@ Published: August 16, 2026";
 		}
 		catch
 		{
-			// 查网卡失败不该阻断连接：当作没有 IPv6，退回 IPv4。
+			// 鏌ョ綉鍗″け璐ヤ笉璇ラ樆鏂繛鎺ワ細褰撲綔娌℃湁 IPv6锛岄€€鍥?IPv4銆?
 		}
 		return false;
 	}
 }
+

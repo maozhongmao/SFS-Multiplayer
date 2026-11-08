@@ -607,7 +607,7 @@ static int mp_send_create_rocket_full(void){
     bw2_u8(&w, 9);                       /* PacketType.CreateRocket */
     bw2_f64(&w, 0.0);                    /* world_time 服务端补 */
     bw2_i32(&w, g_local_id);             /* local_id: changes when local rocket changes */
-    bw2_i32(&w, -1);                     /* global_id */
+    bw2_i32(&w, g_global_id);            /* existing gid -> structure overwrite; -1 -> new rocket */
     bw2_bool(&w, 0);                     /* for_launch */
     bw2_str(&w, g_st_name[0] ? g_st_name : "MP-Android");
     bw2_f64(&w, g_lx); bw2_f64(&w, g_ly); bw2_f64(&w, g_lvx); bw2_f64(&w, g_lvy);
@@ -618,7 +618,7 @@ static int mp_send_create_rocket_full(void){
     bw2_i32(&w, g_st_nparts);
     for(i=0;i<g_st_nparts;i++){
         const mp_part_rec* p = &g_st_parts[i];
-        bw2_i32(&w, i + 1);              /* part id */
+        bw2_i32(&w, p->id ? p->id : (i + 1));   /* deterministic part id (PC-compatible) */
         bw2_str(&w, p->name);
         bw2_f32(&w, p->x); bw2_f32(&w, p->y);
         bw2_f32(&w, p->ox); bw2_f32(&w, p->oy); bw2_f32(&w, p->oz);
@@ -734,6 +734,36 @@ static int mp_send_destroy_rocket_now(int rocket_id){
     return fn > 0 ? send_msg(frame, fn) : -1;
 }
 
+#define MP_TX_DR_MAX 16
+static pthread_mutex_t g_tx_dr_lock = PTHREAD_MUTEX_INITIALIZER;
+static int g_tx_dr[MP_TX_DR_MAX];
+static int g_tx_dr_n = 0;
+
+void mp_queue_destroy_rocket(int rocket_id){
+    if(rocket_id < 0) return;
+    pthread_mutex_lock(&g_tx_dr_lock);
+    for(int i=0;i<g_tx_dr_n;i++) if(g_tx_dr[i] == rocket_id){ pthread_mutex_unlock(&g_tx_dr_lock); return; }
+    if(g_tx_dr_n < MP_TX_DR_MAX) g_tx_dr[g_tx_dr_n++] = rocket_id;
+    pthread_mutex_unlock(&g_tx_dr_lock);
+}
+
+static void mp_drain_destroy_rockets(void){
+    for(int guard=0; guard<MP_TX_DR_MAX; ++guard){
+        int gid;
+        pthread_mutex_lock(&g_tx_dr_lock);
+        if(g_tx_dr_n == 0){ pthread_mutex_unlock(&g_tx_dr_lock); return; }
+        gid = g_tx_dr[0];
+        for(int i=1;i<g_tx_dr_n;i++) g_tx_dr[i-1]=g_tx_dr[i];
+        --g_tx_dr_n;
+        pthread_mutex_unlock(&g_tx_dr_lock);
+
+        int ret = mp_send_destroy_rocket_now(gid);
+        { mp_rrocket_t* rr = rr_slot(gid);
+          if(rr){ rr->valid=0; rr->has_structure=0; rr->dirty=1; } }
+        { char b[128]; snprintf(b,sizeof(b),"mp: clear pad rocket gid=%d ret=%d\n", gid, ret); mp_log(b); }
+    }
+}
+
 void mp_on_new_local_rocket(void){
     int old = g_global_id;
     if(old >= 0) g_destroy_old_gid = old;
@@ -746,6 +776,13 @@ void mp_on_new_local_rocket(void){
     ++g_local_id;
     if(g_local_id <= 0) g_local_id = 1;
     { char b[128]; snprintf(b,sizeof(b),"mp: new local rocket local_id=%d old_gid=%d\n", g_local_id, old); mp_log(b); }
+}
+
+void mp_reupload_structure(void){
+    /* 本地火箭对象变化（分级/拆分/控制切换）：保留当前 gid，只重传结构覆盖，
+       不再 DestroyRocket 旧 gid + CreateRocket 新 gid，避免 PC 端火箭消失/重建和碰撞爆炸。 */
+    g_create_sent = 0;
+    { char b[128]; snprintf(b,sizeof(b),"mp: reupload structure on gid=%d local_id=%d\n", g_global_id, g_local_id); mp_log(b); }
 }
 
 static int mp_send_primary(void){
@@ -946,6 +983,18 @@ static void* mp_thread(void* arg){
                         snprintf(b,sizeof(b),"mp: ROCKET id=%d planet='%s' pos=(%.1f, %.1f) vel=(%.2f, %.2f) rot=%.1f\n",
                                  rid, pl, px, py, vx, vy, rot);
                         mp_log(b);
+                    } else if(ptype == 10 /*DestroyRocket*/){
+                        if(plen >= 14){
+                            int gid = 0;
+                            memcpy(&gid, f + 22, 4);
+                            mp_rrocket_t* rr = rr_slot(gid);
+                            if(rr){
+                                rr->valid = 0;
+                                rr->has_structure = 0;
+                                rr->dirty = 1;
+                            }
+                            { char db[128]; snprintf(db,sizeof(db),"mp: REMOTE DESTROY gid=%d -> remove ghost\n", gid); mp_log(db); }
+                        }
                     } else if(ptype == 13 /*DestroyPart*/){
                         mp_destroy_part_t event;
                         if(mp_parse_destroy_part(f + 13, payloadBits, &event)){
@@ -993,13 +1042,6 @@ static void* mp_thread(void* arg){
             mp_log(b);
             break;
         }
-        if(got_ack){
-            int old_gid = __sync_lock_test_and_set(&g_destroy_old_gid, -1);
-            if(old_gid >= 0){
-                int dr = mp_send_destroy_rocket_now(old_gid);
-                char db[128]; snprintf(db,sizeof(db),"mp: DestroyRocket old gid=%d ret=%d\n", old_gid, dr); mp_log(db);
-            }
-        }
         if(got_ack && g_have_pose && mp_structure_ready() && !g_create_sent){
             if(mp_send_create_rocket() > 0){
                 g_create_sent = 1;
@@ -1008,6 +1050,14 @@ static void* mp_thread(void* arg){
         } else if(got_ack && g_have_pose && g_create_sent && g_global_id >= 0){
             static unsigned long long last_primary = 0;
             if(now - last_primary >= 50){ last_primary = now; mp_send_primary(); }
+        }
+        /* 新火箭回执已到（g_global_id 有效）后再销毁旧 gid，PC 先看到新火箭再看到旧火箭消失，不会出现空档。 */
+        if(got_ack && g_create_sent && g_global_id >= 0){
+            int old_gid = __sync_lock_test_and_set(&g_destroy_old_gid, -1);
+            if(old_gid >= 0){
+                int dr = mp_send_destroy_rocket_now(old_gid);
+                char db[128]; snprintf(db,sizeof(db),"mp: DestroyRocket old gid=%d ret=%d\n", old_gid, dr); mp_log(db);
+            }
         }
         /* v72: 拿到 global_id 后立刻声明控制权，并每秒重申一次（服务端对相同目标只回执、不刷新） */
         if(got_ack && g_global_id >= 0){
@@ -1023,6 +1073,7 @@ static void* mp_thread(void* arg){
                 ctl_logs++;
             }
         }
+        if(got_ack) mp_drain_destroy_rockets();
         if(got_ack && g_global_id >= 0) mp_drain_destroy_parts();
         /* v186：睡到「下一次 KCP update」为止（1–10ms），比固定 10ms 唤醒更省电也更准时 */
         { IUINT32 n2 = (IUINT32)mp_now_ms();

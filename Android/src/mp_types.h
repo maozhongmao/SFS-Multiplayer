@@ -73,6 +73,7 @@ typedef struct { char name[28]; int v; }    mp_tvar_t;
 typedef struct { char name[28]; char val[56]; } mp_xvar_t;
 
 typedef struct {
+    int   id;                 /* DeterministicPartID (PC-compatible) */
     char  name[48];
     float x, y, ox, oy, oz, temp;
     int   nnv, ntv, nxv;
@@ -96,5 +97,7 @@ typedef struct { double world_time; int rocket_id; int part_id; int create_explo
 int          mp_rr_remove_part(int rocket_id, int part_id);
 void         mp_queue_destroy_part(int part_id, int create_explosion, unsigned reason);
 void         mp_on_new_local_rocket(void);
+void         mp_reupload_structure(void);
+void         mp_queue_destroy_rocket(int rocket_id);
 
 #endif
