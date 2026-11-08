@@ -57,13 +57,9 @@ Spaceflight Simulator 的实时多人联机项目。公共服务器：stch.de5.n
 
 感谢所有使用SFS-Multiplayer、报告漏洞、请求功能、测试构建并贡献修复的朋友们。
 
-<a href="https://www.star-history.com/?repos=maozhongmao%2Fsfs-multiplayer%2Csfsplayer-sys%2Fspaceflight-simulator-multiplayermod%2Carctic-ice67%2Fspaceflightsimulator-multiplayermod-mobileandpc&type=date&legend=top-right">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod%2Carctic-ice67/spaceflightsimulator-multiplayermod-mobileandpc&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod%2Carctic-ice67/spaceflightsimulator-multiplayermod-mobileandpc&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod%2Carctic-ice67/spaceflightsimulator-multiplayermod-mobileandpc&type=date&legend=bottom-right" />
- </picture>
-</a>
+## Star History
+
+[![Star History Chart](https://api.star-history.com/chart?repos=maozhongmao/sfs-multiplayer%2Csfsplayer-sys/spaceflight-simulator-multiplayermod&type=date&legend=bottom-right)](https://www.star-history.com/?repos=maozhongmao%2Fsfs-multiplayer%2Csfsplayer-sys%2Fspaceflight-simulator-multiplayermod&type=date&legend=bottom-right)
 
 ## 文档
 
