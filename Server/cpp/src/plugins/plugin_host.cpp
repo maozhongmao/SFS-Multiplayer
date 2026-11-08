@@ -154,17 +154,11 @@ std::int32_t PluginHost::trampoline_call(void* ctx, const char* op, const char* 
     Plugin* p = b->plugin;
     if (p->state != PluginState::kRunning) return kHostErrState;
 
-    // op -> 能力位（查询类 op 不需要能力位）
-    std::uint32_t need = 0u;
-    if (std::strcmp(op, "kick") == 0 || std::strcmp(op, "clearDebris") == 0 ||
-        std::strcmp(op, "setTimeScale") == 0) need = kCapAdmin;
-    else if (std::strcmp(op, "readRocket") == 0) need = kCapReadRocket;
-    else if (std::strcmp(op, "writeRocket") == 0) need = kCapWriteRocket;
-    else if (std::strcmp(op, "worldTime") != 0 && std::strcmp(op, "serverInfo") != 0) return kHostErrBadArgument;
-    if (need != 0u && (p->capabilities & need) == 0u) return kHostErrNoCapability;
-
-    const std::int32_t budget = host->consume_api_budget(p);
-    if (budget != kHostOk) return budget;
+    // 沙箱已移除：不再检查能力位，也不再扣 API 调用预算。
+    // 只保留 op 名存在性和 HostServices 可用性检查。
+    (void)p;
+    (void)host;
+    if (op == nullptr) return kHostErrBadArgument;
     if (host->services_ == nullptr) return kHostErrUnavailable;
     return host->services_->call(op, arg, out, out_cap);
 }
@@ -200,29 +194,20 @@ bool PluginHost::load(const PluginDescriptor& descriptor, std::string* error) {
     if ((descriptor.capabilities & ~kCapAll) != 0u) return fail("unknown capability bit");
     if (descriptor.bytecode.empty()) return fail("empty bytecode");
     if (descriptor.bytecode.size() > kMaxBytecodeBytes) return fail("bytecode too large");
-    if (descriptor.limits.memory_limit_bytes == 0u ||
-        descriptor.limits.memory_limit_bytes > kMaxMemoryLimitBytes)
-        return fail("memory limit out of range");
-    if (descriptor.limits.max_stack_bytes == 0u ||
-        descriptor.limits.max_stack_bytes > kMaxStackBytes)
-        return fail("stack limit out of range");
-    if (descriptor.limits.instruction_budget == 0u ||
-        descriptor.limits.instruction_budget > kMaxInstructionBudget)
-        return fail("instruction budget out of range");
-    if (descriptor.limits.max_api_calls == 0u ||
-        descriptor.limits.max_api_calls > kMaxApiCallsPerDispatch)
-        return fail("api call budget out of range");
+    // 沙箱已移除：不再校验/下发内存、栈、指令、API 调用预算。
+    // 插件在宿主进程内运行，能开服务器的人自行对插件负责。
     if (factory_ == nullptr) return fail("no engine factory");
 
     std::unique_ptr<IJsEngine> engine = factory_->create();
     if (!engine) return fail("engine factory returned null");
-    // 先下发资源上限，再载入字节码：引擎在解析/建堆之前就知道天花板。
-    if (!engine->set_memory_limit(descriptor.limits.memory_limit_bytes))
-        return fail("engine rejected memory limit");
-    if (!engine->set_max_stack_size(descriptor.limits.max_stack_bytes))
-        return fail("engine rejected stack limit");
+    // 沙箱已移除：不再给引擎下发内存/栈上限，直接载入字节码。
+    engine->set_plugin_info(descriptor.name.empty() ? descriptor.id.c_str() : descriptor.name.c_str(),
+                            descriptor.author.c_str(), descriptor.version.c_str(),
+                            descriptor.minimum_server_version.c_str());
     if (!engine->load_bytecode(descriptor.bytecode.data(), descriptor.bytecode.size()))
         return fail("engine rejected bytecode");
+    if (!engine->call_hook("onLoad"))
+        return fail("onLoad failed");
 
     std::unique_ptr<Plugin> plugin(new Plugin());
     plugin->id = descriptor.id;
@@ -353,6 +338,13 @@ void PluginHost::pump(double now_seconds) {
     if (now_seconds < next_delivery_seconds_) return;
     next_delivery_seconds_ = now_seconds + kDefaultDeliveryIntervalSeconds;
 
+    // 生命周期 onTick：与事件同节拍（每秒一次），不额外增加回调频率。
+    for (auto& holder : plugins_) {
+        Plugin* p = holder.get();
+        if (p != nullptr && p->state == PluginState::kRunning && p->engine)
+            p->engine->call_hook("onTick");
+    }
+
     if (has_pending_world_) {
         PluginEvent event;
         event.kind = kEventWorldSnapshot;
@@ -387,7 +379,7 @@ void PluginHost::deliver(const PluginEvent& event) {
         // 每轮重置两个预算：指令预算交给引擎的中断回调，API 预算在宿主侧扣。
         p->api_calls_in_phase = 0;
         p->writes_in_phase = 0;
-        p->engine->set_instruction_budget(p->limits.instruction_budget);
+        p->engine->set_instruction_budget(0);   // 0 = 不限制（沙箱已移除）
         const bool ok = p->engine->dispatch(event);
         p->engine->collect_garbage();
         if (!ok) {
@@ -402,20 +394,15 @@ void PluginHost::deliver(const PluginEvent& event) {
 // ---------------------------------------------------------- 宿主 API（能力白名单 + 边界检查）
 
 std::int32_t PluginHost::consume_api_budget(Plugin* p) {
-    if (p->api_calls_in_phase >= p->limits.max_api_calls) return kHostErrBudget;
-    ++p->api_calls_in_phase;
     return kHostOk;
 }
 
 std::int32_t PluginHost::api_read_rocket(Binding* b, std::int32_t rocket_id, RocketView* out) {
     if (b == nullptr || b->plugin == nullptr || b->host == nullptr) return kHostErrState;
     Plugin* p = b->plugin;
-    if (!has_capability(p->capabilities, kCapReadRocket)) return kHostErrNoCapability;
     if (rocket_id < 0 || out == nullptr) return kHostErrBadArgument;
     if (p->state != PluginState::kRunning) return kHostErrState;
     if (services_ == nullptr) return kHostErrUnavailable;
-    const std::int32_t budget = consume_api_budget(p);
-    if (budget != kHostOk) return budget;
     *out = RocketView{};
     if (!services_->read_rocket(rocket_id, out)) return kHostErrNotFound;
     return kHostOk;
@@ -424,7 +411,6 @@ std::int32_t PluginHost::api_read_rocket(Binding* b, std::int32_t rocket_id, Roc
 std::int32_t PluginHost::api_write_rocket(Binding* b, const RocketView* view) {
     if (b == nullptr || b->plugin == nullptr || b->host == nullptr) return kHostErrState;
     Plugin* p = b->plugin;
-    if (!has_capability(p->capabilities, kCapWriteRocket)) return kHostErrNoCapability;
     if (view == nullptr || view->rocket_id < 0) return kHostErrBadArgument;
     if (view->part_count < 0 || view->part_count > 4096) return kHostErrBadArgument;
     if (view->throttle < 0.0 || view->throttle > 1.0) return kHostErrBadArgument;
@@ -435,9 +421,6 @@ std::int32_t PluginHost::api_write_rocket(Binding* b, const RocketView* view) {
         return kHostErrBadArgument;
     if (p->state != PluginState::kRunning) return kHostErrState;
     if (services_ == nullptr) return kHostErrUnavailable;
-    if (p->writes_in_phase >= kMaxWritesPerDispatch) return kHostErrBudget;
-    const std::int32_t budget = consume_api_budget(p);
-    if (budget != kHostOk) return budget;
     if (!services_->write_rocket(*view)) return kHostErrNotFound;
     ++p->writes_in_phase;
     return kHostOk;
@@ -447,7 +430,6 @@ std::int32_t PluginHost::api_send_message(Binding* b, std::int32_t player_id,
                                           const char* utf8_text) {
     if (b == nullptr || b->plugin == nullptr || b->host == nullptr) return kHostErrState;
     Plugin* p = b->plugin;
-    if (!has_capability(p->capabilities, kCapSendMessage)) return kHostErrNoCapability;
     if (player_id < 0 || utf8_text == nullptr) return kHostErrBadArgument;
     // 发给客户端的是 UTF-8（可以带中文），但拒绝控制字符并把总长卡死，
     // 避免插件往聊天/日志里塞不可见控制序列或超长文本。
@@ -459,8 +441,6 @@ std::int32_t PluginHost::api_send_message(Binding* b, std::int32_t player_id,
     }
     if (p->state != PluginState::kRunning) return kHostErrState;
     if (services_ == nullptr) return kHostErrUnavailable;
-    const std::int32_t budget = consume_api_budget(p);
-    if (budget != kHostOk) return budget;
     if (!services_->send_message(player_id, utf8_text)) return kHostErrNotFound;
     return kHostOk;
 }
@@ -468,11 +448,8 @@ std::int32_t PluginHost::api_send_message(Binding* b, std::int32_t player_id,
 std::int32_t PluginHost::api_log(Binding* b, const char* utf8_text) {
     if (b == nullptr || b->plugin == nullptr || b->host == nullptr) return kHostErrState;
     Plugin* p = b->plugin;
-    if (!has_capability(p->capabilities, kCapLog)) return kHostErrNoCapability;
     if (utf8_text == nullptr) return kHostErrBadArgument;
     // 日志出口不要求 services_：没有适配层时退回 stdout，但仍然是 ASCII。
-    const std::int32_t budget = consume_api_budget(p);
-    if (budget != kHostOk) return budget;
     log_line("[plugin:" + p->id + "] " + to_ascii(utf8_text, kMaxTextBytes - 1u));
     return kHostOk;
 }

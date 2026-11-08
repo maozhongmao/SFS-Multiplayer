@@ -59,14 +59,14 @@ public class MainActivity extends Activity {
         root.setPadding(dp(20), dp(28), dp(20), dp(16));
 
         TextView title = new TextView(this);
-        title.setText("SFS 联机补丁");
+        title.setText(Lang.t("SFS 联机补丁","SFS Multiplayer Patch"));
         title.setTextColor(Color.WHITE);
         title.setTextSize(24);
         title.setTypeface(title.getTypeface(), android.graphics.Typeface.BOLD);
         root.addView(title);
 
         TextView sub = new TextView(this);
-        sub.setText("补丁安装器 · v" + selfVersion());
+        sub.setText(Lang.t("补丁安装器 · v","Patch Installer · v") + selfVersion());
         sub.setTextColor(Color.parseColor("#9E9E9E"));
         sub.setTextSize(12);
         sub.setPadding(0, dp(2), 0, dp(10));
@@ -78,25 +78,25 @@ public class MainActivity extends Activity {
         status.setTextSize(12);
         status.setBackgroundColor(Color.parseColor("#1E1E1E"));
         status.setPadding(dp(12), dp(10), dp(12), dp(10));
-        status.setText("正在读取游戏信息…");
+        status.setText(Lang.t("正在读取游戏信息…","Reading game info…"));
         root.addView(status);
 
         cbCoexist = new CheckBox(this);
-        cbCoexist.setText("共存模式（包名改为 " + ApkPatcher.COEXIST_PKG + "，不覆盖官方）");
+        cbCoexist.setText(Lang.t("共存模式（包名改为 ","Coexist mode (package ") + ApkPatcher.COEXIST_PKG + Lang.t("，不覆盖官方）",", official app untouched)"));
         cbCoexist.setTextSize(13);
         cbCoexist.setChecked(true);
         cbCoexist.setTextColor(Color.parseColor("#B0BEC5"));
         root.addView(cbCoexist);
 
-        btnDetect = button("检测游戏");
-        btnBackup = button("① 备份存档");
-        btnBuild = button("② 生成补丁包");
-        btnInstall = button("③ 安装补丁包");
+        btnDetect = button(Lang.t("检测游戏","Detect game"));
+        btnBackup = button(Lang.t("① 备份存档","① Backup saves"));
+        btnBuild = button(Lang.t("② 生成补丁包","② Build patch"));
+        btnInstall = button(Lang.t("③ 安装补丁包","③ Install patch"));
         pbBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         pbBar.setMax(100); pbBar.setProgress(0);
         root.addView(pbBar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(6)));
         root.addView(btnBackup);
-        btnPick = button("选择本地安装包");
+        btnPick = button(Lang.t("选择本地安装包","Choose local APK"));
         root.addView(btnPick);
         btnPick.setVisibility(View.GONE);
         btnPick.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { pickFile(); } });
@@ -189,8 +189,8 @@ public class MainActivity extends Activity {
     void detect() {
         PackageInfo pi = gameInfo();
         if (pi == null) {
-            status.setText("游戏：未安装\n\n请安装官方 Spaceflight Simulator，或点下面的「选择本地安装包」。");
-            say("未找到游戏包 " + GAME);
+            status.setText(Lang.t("游戏：未安装\n\n请安装官方 Spaceflight Simulator，或点下面的「选择本地安装包」。","Game: not installed\n\nInstall official Spaceflight Simulator, or tap Choose local APK below."));
+            say(Lang.t("未找到游戏包 ","Game package not found: ") + GAME);
             if (btnPick != null) btnPick.setVisibility(View.VISIBLE);
             return;
         }
@@ -198,15 +198,15 @@ public class MainActivity extends Activity {
         ApplicationInfo ai = pi.applicationInfo;
         File apk = new File(ai.sourceDir);
         StringBuilder sb = new StringBuilder();
-        sb.append("游戏：已安装\n");
-        sb.append("版本：").append(pi.versionName).append(" (").append(pi.versionCode).append(")\n");
-        sb.append("启动类：").append(String.valueOf(gameLauncher())).append("\n");
-        sb.append("路径：").append(ai.sourceDir).append("\n");
-        sb.append("大小：").append(apk.length() / (1024 * 1024)).append(" MB\n");
-        sb.append("架构：").append(Build.SUPPORTED_ABIS[0]).append("\n");
-        sb.append("日志：").append(FileLog.path());
+        sb.append(Lang.t("游戏：已安装\n","Game: installed\n"));
+        sb.append(Lang.t("版本：","Version: ")).append(pi.versionName).append(" (").append(pi.versionCode).append(")\n");
+        sb.append(Lang.t("启动类：","Launcher: ")).append(String.valueOf(gameLauncher())).append("\n");
+        sb.append(Lang.t("路径：","Path: ")).append(ai.sourceDir).append("\n");
+        sb.append(Lang.t("大小：","Size: ")).append(apk.length() / (1024 * 1024)).append(" MB\n");
+        sb.append(Lang.t("架构：","ABI: ")).append(Build.SUPPORTED_ABIS[0]).append("\n");
+        sb.append(Lang.t("日志：","Log: ")).append(FileLog.path());
         status.setText(sb.toString());
-        say("检测到游戏 " + pi.versionName + " (" + pi.versionCode + ")");
+        say(Lang.t("检测到游戏 ","Detected game ") + pi.versionName + " (" + pi.versionCode + ")");
     }
 
     void doBackup() {
@@ -216,8 +216,8 @@ public class MainActivity extends Activity {
         new Thread(new Runnable() { public void run() {
             try {
                 long n = copyTree(src, dst);
-                say("备份完成: " + dst.getAbsolutePath() + " (" + (n / 1024 / 1024) + " MB)");
-            } catch (Throwable t) { say("备份失败: " + t); }
+                say(Lang.t("备份完成: ","Backup complete: ") + dst.getAbsolutePath() + " (" + (n / 1024 / 1024) + " MB)");
+            } catch (Throwable t) { say(Lang.t("备份失败: ","Backup failed: ") + t); }
         } }).start();
     }
 
@@ -245,7 +245,7 @@ public class MainActivity extends Activity {
     void pickApk() {
         final java.util.List<PackageInfo> apps = new java.util.ArrayList<PackageInfo>();
         final java.util.List<String> items = new java.util.ArrayList<String>();
-        items.add("浏览本地 APK 文件…");
+        items.add(Lang.t("浏览本地 APK 文件…","Browse local APK…"));
         try {
             for (PackageInfo pi : getPackageManager().getInstalledPackages(0)) {
                 if (pi.applicationInfo == null) continue;
@@ -254,8 +254,8 @@ public class MainActivity extends Activity {
                 apps.add(pi);
                 items.add(getPackageManager().getApplicationLabel(pi.applicationInfo) + "  ·  " + pi.packageName);
             }
-        } catch (Throwable t) { say("枚举应用失败: " + t); }
-        new AlertDialog.Builder(this).setTitle("选择要打补丁的应用")
+        } catch (Throwable t) { say(Lang.t("枚举应用失败: ","Failed to list apps: ") + t); }
+        new AlertDialog.Builder(this).setTitle(Lang.t("选择要打补丁的应用","Choose app to patch"))
             .setItems(items.toArray(new String[0]), new android.content.DialogInterface.OnClickListener() {
                 public void onClick(android.content.DialogInterface d, int which) {
                     if (which == 0) { pickFile(); return; }
@@ -269,9 +269,9 @@ public class MainActivity extends Activity {
 
     void useSource(File apk, int vc, String launcher, String pkgLabel) {
         lastSource = apk; lastVc = vc; lastLauncher = launcher;
-        say("已选来源: " + pkgLabel + " (" + vc + ")，启动类 " + launcher);
+        say(Lang.t("已选来源: ","Selected source: ") + pkgLabel + " (" + vc + ")，启动类 " + launcher);
         String nl = String.valueOf((char) 10);
-        status.setText("来源：" + pkgLabel + nl + "版本码：" + vc + nl + "大小：" + (apk.length() / 1048576) + " MB" + nl + "启动类：" + launcher + nl + "路径：" + apk.getAbsolutePath());
+        status.setText("来源：" + pkgLabel + nl + "版本码：" + vc + nl + Lang.t("大小：","Size: ") + (apk.length() / 1048576) + " MB" + nl + Lang.t("启动类：","Launcher: ") + launcher + nl + Lang.t("路径：","Path: ") + apk.getAbsolutePath());
     }
 
     void pickFile() {
@@ -293,11 +293,11 @@ public class MainActivity extends Activity {
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
             in.close(); out.close();
             PackageInfo pi = getPackageManager().getPackageArchiveInfo(dst.getAbsolutePath(), PackageManager.GET_ACTIVITIES);
-            if (pi == null) { say("这个 APK 解析不了（可能不是完整包）"); return; }
+            if (pi == null) { say(Lang.t("这个 APK 解析不了（可能不是完整包）","Cannot parse this APK (possibly incomplete)")); return; }
             String lc = (pi.activities != null && pi.activities.length > 0) ? pi.activities[0].name : null;
             lastSource = dst; lastVc = pi.versionCode; lastLauncher = lc;
             useSource(dst, pi.versionCode, lc, "本地 APK");
-        } catch (Throwable t) { say("读取失败: " + t); }
+        } catch (Throwable t) { say(Lang.t("读取失败: ","Read failed: ") + t); }
     }
 
     void doBuild() {
@@ -305,31 +305,31 @@ public class MainActivity extends Activity {
         final File src = (lastSource != null && lastSource.isFile()) ? lastSource : (pi == null ? null : new File(pi.applicationInfo.sourceDir));
         final String launcher = (lastSource != null && lastSource.isFile()) ? lastLauncher : gameLauncher();
         final int baseVc = (lastSource != null && lastSource.isFile()) ? lastVc : (pi == null ? 0 : pi.versionCode);
-        if (src == null || launcher == null) { say("先装官方游戏，或点「选择本地 APK」"); return; }
+        if (src == null || launcher == null) { say(Lang.t("先装官方游戏，或点「选择本地 APK」","Install official game first, or choose local APK")); return; }
         btnBuild.setEnabled(false);
         new Thread(new Runnable() { public void run() {
             try {
                 File cache = getCacheDir();
                 File unsigned = new File(cache, "patched-unsigned.apk");
                 File signed = new File(getExternalFilesDir(null), "SFS-联机补丁-" + baseVc + "-" + (baseVc + 1) + ".apk");
-                say("开始生成补丁包…");
+                say(Lang.t("开始生成补丁包…","Building patch…"));
                 pg(5);
                 long t0 = System.currentTimeMillis();
                 ApkPatcher.buildUnsigned(MainActivity.this, src, unsigned, launcher, baseVc + 1,
                         cbCoexist.isChecked() ? ApkPatcher.COEXIST_PKG : null, new ApkPatcher.Log() {
                     public void line(String s) { say(s); }
                 });
-                say("未签名包 " + unsigned.length() / 1048576 + " MB，用时 " + ((System.currentTimeMillis() - t0) / 1000) + " s");
+                say(Lang.t("未签名包 ","Unsigned package ") + unsigned.length() / 1048576 + " MB，用时 " + ((System.currentTimeMillis() - t0) / 1000) + " s");
                 pg(55);
                 ApkPatcher.sign(MainActivity.this, unsigned, signed, new ApkPatcher.Log() {
                     public void line(String s) { say(s); }
                 });
                 lastPatch = signed;
-                say("完成: " + signed.getAbsolutePath());
+                say(Lang.t("完成: ","Done: ") + signed.getAbsolutePath());
                 pg(90);
                 ui.post(new Runnable() { public void run() { btnInstall.setEnabled(true); } });
             } catch (Throwable t) {
-                say("生成失败: " + t);
+                say(Lang.t("生成失败: ","Build failed: ") + t);
             } finally {
                 ui.post(new Runnable() { public void run() { btnBuild.setEnabled(true); } });
             }
@@ -341,12 +341,12 @@ public class MainActivity extends Activity {
     }
 
     void askAllFiles() {
-        say("需要「所有文件访问」权限（备份/恢复存档要用），正在打开设置…");
+        say(Lang.t("需要「所有文件访问」权限（备份/恢复存档要用），正在打开设置…","Need All files access permission (for save backup/restore). Opening settings…"));
         try {
             Intent i = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
             i.setData(Uri.parse("package:" + getPackageName()));
             startActivity(i);
-        } catch (Throwable t) { say("打开设置失败: " + t); }
+        } catch (Throwable t) { say(Lang.t("打开设置失败: ","Failed to open settings: ") + t); }
     }
 
     File findPatch() {
@@ -408,7 +408,7 @@ public class MainActivity extends Activity {
             FileLog.line("INSTALL", "calling commit sender=" + (cb == null ? "null" : "ok"));
             s.commit(cb.getIntentSender());
             FileLog.line("INSTALL", "commit returned (session committed)");
-            say("安装会话已提交，等待系统安装器…");
+            say(Lang.t("安装会话已提交，等待系统安装器…","Install session submitted; waiting for system installer…"));
         } catch (Throwable t) {
             FileLog.line("INSTALL", "installApk threw");
             FileLog.t("INSTALL", t);
@@ -418,30 +418,30 @@ public class MainActivity extends Activity {
 
     void doInstall() {
         final File apk = findPatch();
-        if (apk == null || !apk.isFile()) { say("还没有补丁包，先点「② 生成补丁包」"); return; }
+        if (apk == null || !apk.isFile()) { say(Lang.t("还没有补丁包，先点「② 生成补丁包」","No patch yet. Tap Build patch first.")); return; }
         if (!cbCoexist.isChecked() && !hasAllFiles()) { askAllFiles(); return; }
         if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-            say("需要允许「安装未知应用」，正在打开设置…");
+            say(Lang.t("需要允许「安装未知应用」，正在打开设置…","Need Install unknown apps permission. Opening settings…"));
             try {
                 startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         Uri.parse("package:" + getPackageName())));
-            } catch (Throwable t) { say("打开设置失败: " + t); }
+            } catch (Throwable t) { say(Lang.t("打开设置失败: ","Failed to open settings: ") + t); }
             return;
         }
         btnInstall.setEnabled(false);
-        say("补丁包: " + apk.getName() + " (" + (apk.length() / 1048576) + " MB)");
+        say(Lang.t("补丁包: ","Patch: ") + apk.getName() + " (" + (apk.length() / 1048576) + " MB)");
         if (cbCoexist.isChecked()) {
-            say("共存模式：直接安装，不卸载官方、不动存档");
+            say(Lang.t("共存模式：直接安装，不卸载官方、不动存档","Coexist: install directly; official app and saves untouched"));
             new Thread(new Runnable() { public void run() {
                 try {
                     installApk(apk);
                     String target = ApkPatcher.COEXIST_PKG;
                     if (!waitPkg(target, true, 180000)) {
-                        say("安装未完成：系统里没有 " + target + "（可能没弹确认框或被取消）");
+                        say(Lang.t("安装未完成：系统里没有 ","Install incomplete: not found ") + target + "（可能没弹确认框或被取消）");
                         return;
                     }
-                    say("补丁已安装：" + target);
-                } catch (Throwable t) { fail("安装失败", t); }
+                    say(Lang.t("补丁已安装：","Patch installed: ") + target);
+                } catch (Throwable t) { fail(Lang.t("安装失败","Install failed"), t); }
                 finally { ui.post(new Runnable() { public void run() { btnInstall.setEnabled(true); } }); }
             } }).start();
             return;
@@ -451,26 +451,26 @@ public class MainActivity extends Activity {
                     new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()));
             try {
                 long n = copyTree(new File("/sdcard/Android/data/" + GAME), new File(backup, GAME));
-                say("已备份存档 " + (n / 1048576) + " MB → " + backup.getAbsolutePath());
+                say(Lang.t("已备份存档 ","Saves backed up ") + (n / 1048576) + " MB → " + backup.getAbsolutePath());
                 if (gameInfo() != null) {
-                    say("卸载官方游戏…");
+                    say(Lang.t("卸载官方游戏…","Uninstalling official game…"));
                     PendingIntent pi = PendingIntent.getActivity(MainActivity.this, 1,
                             new Intent(MainActivity.this, ConfirmActivity.class),
                             PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_MUTABLE);
                     getPackageManager().getPackageInstaller().uninstall(GAME, pi.getIntentSender());
-                    if (!waitState(false, 90000)) { say("卸载超时，请手动卸载后重试"); return; }
-                    say("官方已卸载");
+                    if (!waitState(false, 90000)) { say(Lang.t("卸载超时，请手动卸载后重试","Uninstall timed out; remove manually and retry")); return; }
+                    say(Lang.t("官方已卸载","Official app uninstalled"));
                 }
-                say("正在安装补丁包（系统会弹一次确认）…");
+                say(Lang.t("正在安装补丁包（系统会弹一次确认）…","Installing patch (system confirmation will appear)…"));
                 installApk(apk);
-                if (!waitState(true, 180000)) { say("安装超时或被取消"); return; }
-                say("补丁已安装，正在恢复存档…");
+                if (!waitState(true, 180000)) { say(Lang.t("安装超时或被取消","Install timed out or cancelled")); return; }
+                say(Lang.t("补丁已安装，正在恢复存档…","Patch installed; restoring saves…"));
                 long m = copyTree(new File(backup, GAME), new File("/sdcard/Android/data/" + GAME));
-                say("存档已恢复 " + (m / 1048576) + " MB");
-                say("全部完成，可以启动游戏了");
+                say(Lang.t("存档已恢复 ","Saves restored ") + (m / 1048576) + " MB");
+                say(Lang.t("全部完成，可以启动游戏了","All done. You can launch the game."));
             } catch (Throwable t) {
-                fail("安装流程失败", t);
-                say("存档备份仍在: " + backup.getAbsolutePath());
+                fail(Lang.t("安装流程失败","Install flow failed"), t);
+                say(Lang.t("存档备份仍在: ","Save backup still at: ") + backup.getAbsolutePath());
             } finally {
                 ui.post(new Runnable() { public void run() { btnInstall.setEnabled(true); } });
             }

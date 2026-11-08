@@ -29,7 +29,7 @@
 #include <stdlib.h>
 #include <unwind.h>
 #include "mp_types.h"
-#define SFSMP_VERSION "2.1.3.7"   /* periodic launchpad ghost cleanup */
+#define SFSMP_VERSION "2.1.5.0"   /* batch A: 5 features */
 
 /* v129: 数据目录运行时化 —— 共存版（改过包名）的 /sdcard/Android/data/<包名>/files 和官方不是同一个，
  * 写死官方包名会导致新包里探针/配置全部静默失效（不同 uid 根本写不进去）。 */
@@ -203,6 +203,7 @@ typedef const char* (*fn_tn)(void*);
 static void* g_orig_update = NULL;
 static void* g_findMethod = NULL, *g_typeObj = NULL, *g_rocketCls = NULL;
 static void* g_mGetRot = NULL, *g_mGetTransform = NULL, *g_mGetName = NULL;
+static void *g_col2dCls=NULL, *g_physics2dCls=NULL, *g_mGetCompChildren=NULL, *g_mIgnoreCollision=NULL, *g_typeCollider2D=NULL;
 static void* g_mSetEuler = NULL; static int g_rotLogged = 0;   /* v152: 朝向修正 */
 /* v153: 可玩版位姿跟随 —— 不再每帧瞬移，偏差小就用速度追 */
 static double g_pvx = 0.0, g_pvy = 0.0; static int g_snap = 1; static int g_snapN = 0, g_pursueN = 0;
@@ -436,6 +437,8 @@ static uint64_t part_fingerprint(const v73_part_rec* p){
     return h ? h : 1;
 }
 static void upload_structure(void* rocket);
+static int read_part_ptrs(void* rocket, void** out, int max);
+static void collision_isolation_tick(void);
 static void log_exc(void* exc, const char* tag);
 static void ux_poll_conn(void);
 static void ux_connect_started(void);
@@ -453,6 +456,76 @@ static void clear_remote_pad_rockets(void){
             { char b[140]; snprintf(b,sizeof(b),"v219: clear pad rocket gid=%d at (%.1f,%.1f)\n", rr->gid, rr->x, rr->y); log_app(b); }
         }
     }
+}
+
+/* v220: PC 发射台碰撞隔离移植。
+ * 只对“本机受控火箭 vs 发射台 200m 内远端火箭”的 Collider2D 调 Physics2D.IgnoreCollision，
+ * 不改 Layer、不影响地形/发射台本体。出 200m 或换火箭时恢复碰撞。 */
+static void* g_isoActive = NULL;
+static void* g_isoRemote[8] = {0};
+static int   g_isoN = 0;
+static int   g_isoLog = 0;
+
+static int part_colliders(void* part, void** out, int max){
+    if(!part || !g_mGetCompChildren || !g_mObjGetClass || !g_typeCollider2D) return 0;
+    void* exc=NULL; unsigned char one=1; void* args[2]; args[0]=g_typeCollider2D; args[1]=&one;
+    void* arr=g_ri(g_mGetCompChildren, part, args, &exc);
+    if(!arr || exc) return 0;
+    int n=(int)g_alg(arr);
+    if(n > max) n=max;
+    void** data=(void**)((char*)arr+0x20);
+    for(int i=0;i<n;i++) out[i]=data[i];
+    return n;
+}
+
+static void ignore_rocket_pair(void* a, void* b, int ignore){
+    if(!a || !b || !g_mIgnoreCollision) return;
+    if(g_mObjGetClass && g_rocketCls && (g_mObjGetClass(a)!=g_rocketCls || g_mObjGetClass(b)!=g_rocketCls)) return;
+    void* pa[64], *pb[64];
+    int na=read_part_ptrs(a, pa, 64);
+    int nb=read_part_ptrs(b, pb, 64);
+    if(na<=0 || nb<=0) return;
+    unsigned char en = ignore ? 1 : 0;
+    for(int i=0;i<na;i++){
+        void* ca[32]; int nca=part_colliders(pa[i], ca, 32);
+        if(nca<=0) continue;
+        for(int j=0;j<nb;j++){
+            void* cb[32]; int ncb=part_colliders(pb[j], cb, 32);
+            for(int x=0;x<nca;x++) for(int y=0;y<ncb;y++){
+                if(!ca[x] || !cb[y]) continue;
+                void* args[3]; args[0]=ca[x]; args[1]=cb[y]; args[2]=&en;
+                void* exc=NULL;
+                g_ri(g_mIgnoreCollision, NULL, args, &exc);
+            }
+        }
+    }
+}
+
+static void collision_isolation_tick(void){
+    /* 先恢复上一轮，避免出圈后永久无碰撞 */
+    if(g_isoN > 0){
+        if(g_isoActive){
+            for(int i=0;i<g_isoN;i++) if(g_isoRemote[i]) ignore_rocket_pair(g_isoActive, g_isoRemote[i], 0);
+        }
+        g_isoN=0; g_isoActive=NULL;
+    }
+    if(!g_padValid || !g_last_local_rocket) return;
+    void* cur = g_last_local_rocket;
+    if(g_mObjGetClass && g_rocketCls && g_mObjGetClass(cur)!=g_rocketCls) return;
+    int n=mp_rr_count();
+    for(int i=0;i<n && g_isoN<8;i++){
+        mp_rrocket_t* rr=mp_rr_at(i);
+        if(!rr || !rr->valid || !rr->has_structure) continue;
+        double dx=rr->x-g_padX, dy=rr->y-g_padY;
+        if(dx*dx+dy*dy > 200.0*200.0) continue;
+        void* ro=g_rrRocket[i];
+        if(!ro) continue;
+        ignore_rocket_pair(cur, ro, 1);
+        g_isoRemote[g_isoN++]=ro;
+        if(!g_isoLog){ g_isoLog=1;
+            char b[150]; snprintf(b,sizeof(b),"v220: pad collision isolation ON (remote gid=%d)\n", rr->gid); log_app(b); }
+    }
+    if(g_isoN>0) g_isoActive=cur;
 }
 
 static void publish_local_pose(void){
@@ -3694,6 +3767,7 @@ static void hook_update(void* self){
      * 栈上是 publish_local_pose 走 il2cpp 时踩到场景切换中的失效对象）。
      * 先恢复 30 帧/次（1~2Hz）这个已验证可用的节奏，平滑另找不碰对象生命周期的做法。 */
     if (g_ready && (f % 120) == 0 && strstr(g_sceneName, "World_Mobile")) clear_remote_pad_rockets();
+    if (g_ready && (f % 60) == 0 && strstr(g_sceneName, "World_Mobile")) collision_isolation_tick();
     if (g_ready && (f % 30) == 0 && strstr(g_sceneName, "World_Mobile") && g_rockCls) publish_local_pose();
     if ((f % 15) == 0) ux_poll_conn();
     /* ---- v97: 刚进世界时把服务器快照的「世界时间」推给游戏 -------------------
@@ -4283,6 +4357,16 @@ static void* worker(void* arg){
     { snprintf(b,sizeof(b),"v88: locCls=%p get_Value=%p set_Value=%p locOff=%d\n", locCls, g_mGetValue, g_mSetValue, g_offLoc); log_app(b); }
 
     void* compCls=cf(coreImg,"UnityEngine","Component");
+    void* phys2dImg=NULL;
+    { void* pa=ao(d,"UnityEngine.Physics2DModule"); if(pa) phys2dImg=gi(pa); }
+    g_col2dCls=cf(phys2dImg?phys2dImg:coreImg,"UnityEngine","Collider2D");
+    g_physics2dCls=cf(phys2dImg?phys2dImg:coreImg,"UnityEngine","Physics2D");
+    if(g_col2dCls) g_typeCollider2D=tgo(cgt(g_col2dCls));
+    if(compCls) g_mGetCompChildren=gm(compCls,"GetComponentsInChildren",2);
+    if(g_physics2dCls) g_mIgnoreCollision=gm(g_physics2dCls,"IgnoreCollision",3);
+    if(!g_mIgnoreCollision && g_physics2dCls) g_mIgnoreCollision=gm(g_physics2dCls,"IgnoreCollision",2);
+    if(!g_mIgnoreCollision && g_physics2dCls) g_mIgnoreCollision=gm(g_physics2dCls,"IgnoreCollision",1);
+    { snprintf(b,sizeof(b),"v220: col2d=%p phys2d=%p getChildren=%p ignoreCollision=%p\n", g_col2dCls, g_physics2dCls, g_mGetCompChildren, g_mIgnoreCollision); log_app(b); }
     void* trCls=cf(coreImg,"UnityEngine","Transform");
     g_mGetTransform = compCls?gm(compCls,"get_transform",0):NULL;
     g_mGetName = objCls?gm(objCls,"get_name",0):NULL;

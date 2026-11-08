@@ -27,6 +27,9 @@ typedef struct {
     float x, y;                 /* position (Vector2) */
     float ox, oy, oz;           /* orientation */
     float temp;                 /* temperature */
+    int engine_on, wheel_on, booster_primed;
+    float booster_throttle, booster_fuel, chute_state, chute_target, move_time, move_target;
+    double resource_percent;
     int nnv, ntv, nxv;          /* v161: 下行变量字典条目数（燃料/电量/帆/着陆腿等） */
     mp_rnum_t nv[MP_RV_NUM];
     mp_rtog_t tv[MP_RV_TOG];
@@ -47,6 +50,8 @@ typedef struct {
     double x, y, vx, vy;    /* planet-relative */
     float rot, av, throttle;
     int throttle_on, rcs;
+    float sec_turn, sec_raw_x, sec_raw_y, sec_horiz_x, sec_horiz_y, sec_vert_x, sec_vert_y;
+    int sec_throttle_on, sec_rcs;
     int nparts, njoints, nstages;
     /* v78: 位姿快照环形缓冲（按收到时间排序，[nsnap-1] 最新） */
     mp_snap_t snaps[MP_RR_SNAPS];

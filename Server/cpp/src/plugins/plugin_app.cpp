@@ -14,8 +14,12 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <iterator>
 
 namespace sfs::plugins {
 
@@ -56,6 +60,69 @@ public:
         }
         if (std::strcmp(op, "serverInfo") == 0) {
             return server_->plugin_server_info(out, out_cap);
+        }
+        if (std::strcmp(op, "askUser") == 0) {
+            if (out == nullptr || out_cap <= 1) return -2;
+            if (arg != nullptr) { std::cout << arg; std::cout.flush(); }
+            std::string line;
+            if (!std::getline(std::cin, line)) return -5;
+            if (static_cast<std::int32_t>(line.size()) >= out_cap) line.resize(out_cap - 1);
+            std::memcpy(out, line.data(), line.size()); out[line.size()] = '\0';
+            return 0;
+        }
+        if (std::strcmp(op, "deleteFile") == 0) {
+            if (arg == nullptr) return -2;
+            std::error_code ec; return std::filesystem::remove(arg, ec) ? 0 : -3;
+        }
+        if (std::strcmp(op, "mkdir") == 0) {
+            if (arg == nullptr) return -2;
+            std::error_code ec; std::filesystem::create_directories(arg, ec); return ec ? -3 : 0;
+        }
+        if (std::strcmp(op, "exists") == 0) {
+            if (arg == nullptr) return -2;
+            std::error_code ec; return std::filesystem::exists(arg, ec) ? 0 : -3;
+        }
+        if (std::strcmp(op, "renameFile") == 0) {
+            if (arg == nullptr) return -2;
+            const std::string spec(arg);
+            const std::size_t bar = spec.find('|');
+            if (bar == std::string::npos) return -2;
+            std::error_code ec;
+            std::filesystem::rename(spec.substr(0, bar), spec.substr(bar + 1), ec);
+            return ec ? -3 : 0;
+        }
+        // ---- 沙箱移除后新增：文件系统 API（插件与服务器同权限） ----
+        if (std::strcmp(op, "readFile") == 0) {
+            if (arg == nullptr || out == nullptr || out_cap <= 1) return -2;
+            std::ifstream f(arg, std::ios::binary);
+            if (!f) return -3;
+            std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+            if (static_cast<std::int32_t>(data.size()) >= out_cap) return -2;
+            std::memcpy(out, data.data(), data.size()); out[data.size()] = '\0';
+            return 0;
+        }
+        if (std::strcmp(op, "writeFile") == 0) {
+            if (arg == nullptr) return -2;
+            const std::string spec(arg);
+            const std::size_t bar = spec.find('|');
+            if (bar == std::string::npos) return -2;
+            std::ofstream f(spec.substr(0, bar), std::ios::binary | std::ios::trunc);
+            if (!f) return -3;
+            f.write(spec.data() + bar + 1, static_cast<std::streamsize>(spec.size() - bar - 1));
+            return f.good() ? 0 : -3;
+        }
+        if (std::strcmp(op, "listDir") == 0) {
+            if (arg == nullptr || out == nullptr || out_cap <= 1) return -2;
+            std::string listing;
+            try {
+                for (const auto& e : std::filesystem::directory_iterator(arg)) {
+                    listing += e.path().filename().string(); listing += '\n';
+                    if (static_cast<std::int32_t>(listing.size()) >= out_cap - 1) break;
+                }
+            } catch (...) { return -3; }
+            if (static_cast<std::int32_t>(listing.size()) >= out_cap) listing.resize(out_cap - 1);
+            std::memcpy(out, listing.data(), listing.size()); out[listing.size()] = '\0';
+            return 0;
         }
         return -2;
     }
@@ -110,6 +177,10 @@ int start(const char* plugin_path, sfs::server::Server* server) {
 
     PluginDescriptor desc;
     desc.id = "test-broadcast";
+    desc.name = "Test Broadcast";
+    desc.author = "SFS-Multiplayer";
+    desc.version = "1.0.0";
+    desc.minimum_server_version = "2.1.0";
     // 目前由服务端写死（示例插件用满：日志 + 消息 + 查询 + 管理）。
     // 待改进：应当由插件自带描述符文件声明能力位，而不是服务端硬编码。
     desc.capabilities = kCapSendMessage | kCapLog | kCapAdmin | kCapReadRocket | kCapWriteRocket;

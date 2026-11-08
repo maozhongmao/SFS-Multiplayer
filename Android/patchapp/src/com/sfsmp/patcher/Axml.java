@@ -103,6 +103,20 @@ public final class Axml {
         return u32(b, attr + 16);
     }
 
+    public static int setIntAttr(byte[] b, String elementName, String attrName, final int value) {
+        final int[] old = { -1 };
+        forEachElement(b, new ElemVisitor() {
+            @Override public void visit(int chunk, String name) {
+                if (old[0] >= 0 || !elementName.equals(name)) return;
+                int a = findAttr(b, chunk, attrName);
+                if (a < 0) return;
+                old[0] = u32(b, a + 16);
+                put32(b, a + 16, value);
+            }
+        });
+        return old[0];
+    }
+
     /** 把 <manifest android:versionCode> 改成 newCode（原地 4 字节）。返回改之前的值，找不到返回 -1。 */
     public static int bumpVersionCode(byte[] b, final int newCode) {
         final int[] found = { -1 };
