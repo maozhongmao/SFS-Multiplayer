@@ -2,37 +2,96 @@
 
 本文件记录**接下来要做的事**，以及**已经完成并已随版本发布**的部分。
 
-> 本文件只描述状态，不承诺具体日期。已发布版本的行为请以 [Releases](https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer/releases) 与 [项目维基](https://github.com/maozhongmao/Spaceflight-simulator-Multiplayer/wiki) 为准。
+> 本文件只描述状态，不承诺具体日期。已发布版本的行为请以 Releases 与项目维基为准。
 
-## 手机端（V2.0.2）
+## 当前版本
 
-### 已就绪
+- PC：`SFS-Multiplayer-1.6-V2.1`，版本 `2.1.0.0`
+- Android：`2.1.5.0`（versionCode 959）
+- 服务端协议版本：`2.1.0`
+- 底包：官方 `1.6.00.22`（Android 当前开发底包 versionCode 897；待重新生成注入底包）
 
-| 项 | 说明 |
-| --- | --- |
-| **补丁安装器** | 独立 App，读已安装的官方 APK 就地打补丁，重签名后以共存包名 `com.sfsmp.sfs` 安装；不覆盖官方原版，也不重新分发游戏本体 |
-| **注入层 `libsfsmp.so`** | KCP 连服、握手、位姿与结构同步、在游戏内生成并驱动远端火箭 |
-| **跳板 dex** | `HookActivity` 继承游戏启动 Activity，加载 so 并注入「多人联机」按钮 |
-| **朝向修正** | 改用 `Rigidbody2D.rotation`（此前误用恒为 0 的 `Transform.eulerAngles`，导致所有火箭与地图图标朝上） |
-| **物理观感** | 速度追 + 误差超 2 m 才硬对齐，减少抖动与被地形弹开 |
-| **服务端平台识别** | 握手可上报平台，`players` 按 `[pc]` / `[android]` 标注并汇总；对手机端直接丢弃 P2P 报价 |
-| **PC 端 P2P 快速失败** | 对端 2 秒无回应即回退中继，不再干等 10 秒 |
+## 已完成
 
-### 尚未完成（发布后继续）
+### 补丁安装器
 
-| 项 | 说明 |
-| --- | --- |
-| **对接（Docking）** | 手机端未实现，两端暂时无法对接 |
-| **下行零件变量字典** | 远端燃料、电量、帆、着陆腿等状态取默认值 |
-| **零件尺寸对齐** | 尺寸由 `Orientation.x/y` 决定，下行未完全对齐 |
-| **事件类同步** | 分级、分离、部件模块状态等事件仍是整枚重建 |
-| **时间同步 / 时间加速** | 世界时间与世界加速未对齐 |
+- 独立 App，读取官方 APK 就地打补丁，重签名后以共存包名 `com.sfsmp.sfs` 安装。
+- 不覆盖官方原版，不重新分发游戏本体。
+- 支持中文 / 英文，跟随系统语言；其他语言回退英文。
 
-### 协议
+### Android 同步
 
-手机端整体（注入层、跳板、安装器）以 **GPL-3.0** 发布，条款见 `Android/LICENSE`；仓库其余部分保持 **MPL-2.0**。
+- KCP 连服、握手、位姿与结构同步。
+- 确定性 PartId（与 PC 同款 FNV + 位置算法），用于 CreateRocket / joints / stages / DestroyPart。
+- 本机零件转移保护：零件移动到另一枚本地火箭时不再误发 DestroyPart。
+- 同 gid 生命周期：不再反复 DestroyRocket / CreateRocket；新结构先发 CreateRocket，回执后再销毁旧 gid。
+- 接收 type10 DestroyRocket，清理幽灵火箭与碰撞体。
+- 发射台清理：进入世界/换箭/发射时清理 50m 内远端无主火箭；世界中每 2 秒持续清理。
+- 修复 `rr_check_alive` 的列表误判：远端火箭不再批量消失 6 秒。
+- 修复远端 Location 悬挂指针崩溃。
+- 协议接收：
+  - type6 世界时间
+  - type12 次级状态（油门/RCS/转向/输入）
+  - type15 引擎
+  - type16 轮子
+  - type17 助推器
+  - type18 降落伞
+  - type19 移动模块
+  - type20 资源
+  - type27 改名
+  - type28 温度
+  - type2/3 玩家上下线
+- 模块状态写回远端零件变量（engine_on / wheel_on / booster_primed / fuel_percent / animation_state / deploy_state / state / state_target）。
 
-## 五、参与与反馈
+### PC 端
 
-- 使用问题与联机求助：QQ 群 **679991439**；
-- 想提前试上面这些改动、参与验证的，可通过联系邮箱沟通。
+- KCP 状态探针 framing 修复；Join 状态 Ping/Players 可用。
+- 地址/用户名/密码只做红字提示，不阻止 Join；版本不一致只提示。
+- Join 失败日志空引用保护，避免 Join 失败把游戏炸掉。
+- Cheats 加入 HubManager / BuildManager 菜单。
+- EndMissionMenu：清理 A 占位文本；无效 branch 返回空列表，修复 Destroy 按钮 KeyNotFound。
+- 同 gid 结构“纯子集”原地更新，避免整枚 Destroy/Spawn。
+- 改名轮询发送（`PollLocalRocketRenames`）。
+
+### 服务端
+
+- 版本字符串统一 `2.1.0`。
+- 插件沙箱移除：不再检查能力位，不再限制内存/栈/指令/API 调用预算。
+- 插件 API 扩展：
+  - 元数据 `sfs.plugin`
+  - 生命周期 `onLoad/onUnload/onTick`
+  - 文件 API：readFile/writeFile/listDir/deleteFile/mkdir/exists/renameFile
+  - `sfs.askUser`
+- 删除未使用的 demo 插件引擎。
+- 插件源码可单独编译通过。
+
+## 尚未完成
+
+### Android
+
+- 本地火箭注册表 + 分级/拆分独立 gid（目前仍是同 gid 覆盖的过渡方案）。
+- 发射台碰撞隔离：IL2CPP 裁掉 `Physics2D.IgnoreCollision`，反射不可用；目前靠清理无主火箭而不是 IgnoreCollision。
+- 约 1 秒远端重建空档（PC 收到同 gid CreateRocket 后的重建路径）仍未彻底消除。
+- 轮子悬空自转不同步：PC 协议只带 WheelOn，没有轮速。
+- PC 端改名读到 `rocketName` 为空，改名同步实际未生效。
+- 897 底包的“注入版补丁底包”尚未重新生成；之前已验证底包被 build 清理删除，当前只有手机拉回的临时底包。
+
+### 服务端插件
+
+- 插件源码尚未接入 `build.sh` 的生产构建；当前服务端二进制不包含插件引擎。
+- 仍缺对比同行的 API：原始包级钩子、面板回传、自定义消息拦截、整枚火箭完整状态写入。
+
+### 发布
+
+- 安装器 APK 已构建，但 vivo 系统安装确认被拦截，尚未完成设备安装验证。
+- 文档目录只保留在本地，不再上传仓库。
+
+## 协议与许可
+
+- 手机端整体（注入层、跳板、安装器）以 **GPL-3.0** 发布，条款见 `Android/LICENSE`。
+- 仓库其余部分保持 **MPL-2.0**。
+
+## 参与与反馈
+
+- 使用问题与联机求助：QQ 群 **679991439**。
+- 想提前试改动、参与验证：通过联系邮箱沟通。
