@@ -20,8 +20,8 @@ Server/
 │   └─ build-release.ps1    一次产出全部发布资产（客户端两包 + 服务端四目标 + SHA256SUMS）
 ├─ src/ tests/              .NET 服务端与其测试
 ├─ third_party/             第三方依赖（Lidgren 等，含各自 LICENSE）
-├─ server.example.yml       **C++ 服务端**的配置示例（现行格式）
-├─ server.example.json      **.NET 服务端**的配置示例（旧格式，勿混用）
+├─ server.example.yml       C++ 服务端**的配置示例（现行格式）
+├─ server.example.json      .NET 服务端**的配置示例（旧格式，勿混用）
 ├─ SfsMultiplayer.sln       .NET 解决方案
 ├─ LICENSE                  MPL-2.0
 └─ THIRD-PARTY-NOTICES.md   第三方组件声明
@@ -47,7 +47,6 @@ powershell -ExecutionPolicy Bypass -File Server/cpp/build-release.ps1 -Version 1
 ## 插件系统（QuickJS）
 
 编译期 -DSFS_PLUGINS=1 打开、运行期 SFS_PLUGINS=0 可临时关掉。
-**关闭时产物与未引入前逐字节一致**（quickjs 源码不参与构建）。
 
 ```bash
 SFS_PLUGINS=1 SFS_PLUGIN_PATH=my_plugin.qbc ./sfs-server-kcp-arm --port 9806
