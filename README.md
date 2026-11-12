@@ -70,8 +70,8 @@ Spaceflight Simulator 的实时多人联机项目。**公共服务器：stch.de5
 
 | 范围 | 协议 | 条款 |
 |---|---|---|
-| Android/（注入层 libsfsmp.so、跳板 libmain.so、补丁安装器） | **GPL-3.0** | [Android/LICENSE.txt](Android/LICENSE.txt) |
-| 其余部分（Client/、Server/、Plugin/ 等） | **MPL-2.0** | [LICENSE.txt](LICENSE.txt) |
+| Android/ | **GPL-3.0** | [Android/LICENSE.txt](Android/LICENSE.txt) |
+| Client/、Server/ | **MPL-2.0** | [LICENSE.txt](LICENSE.txt) |
 
 - GPL 部分：分发二进制时必须一并提供对应源码；衍生作品同样以 GPL 发布。
 - MPL 部分：修改过的 MPL 文件需以 MPL 公开其源码，可与闭源代码组合。
