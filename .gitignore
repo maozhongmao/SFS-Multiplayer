@@ -13,3 +13,16 @@ _quarantine/
 # ²¹¶¡¹¹½¨²úÎï/µ×°ü APK
 android/patchapp/build/
 
+
+# æ„å»ºäº§ç‰©ä¸è¡¥ä¸åŒ…ï¼ˆä¸¥ç¦æäº¤ï¼‰
+*.apk
+*.so
+*.aab
+*.jar
+android/build/
+Android/build/
+android/so-out/
+android/patchapp/build/
+android/patchapp/out/
+android/patchapp/assets/*.dex
+android/patchapp/assets/*.so
