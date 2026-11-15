@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # dis4.py -- fast raw disassembler, no script.json (VMA->file via ELF sections)
 import sys, struct, os
 SO = os.environ.get("SO", "/mnt/d/SFS-Multiplayer/android/work/build/work/libil2cpp.so")

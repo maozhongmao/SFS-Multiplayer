@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # 编译 Android 注入库 libsfsmp.so（arm64-v8a + armeabi-v7a）
 # 用法： NDK=/d/sfs-tools/ndk/android-ndk-r27c ./build.sh
 set -euo pipefail

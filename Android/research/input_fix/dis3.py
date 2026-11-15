@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
 # dis3.py -- capstone + script.json symbolizer with proper VMA->file mapping
 import sys, json, struct, bisect
 

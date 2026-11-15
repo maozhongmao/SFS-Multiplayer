@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 // 插件系统的服务端落地：定义 HostServices 的真实实现 + 启动时装载插件。
 // 只在 SFS_PLUGINS=1 时参与编译（默认关闭时整个文件为空 TU ⇒ 发布产物不变）。
 

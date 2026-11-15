@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 import sys, json
 from elftools.elf.elffile import ELFFile
 from elftools.elf.sections import SymbolTableSection

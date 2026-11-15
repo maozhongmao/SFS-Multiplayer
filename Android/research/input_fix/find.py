@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 import json,sys
 d=json.load(open('/mnt/d/SFS-Multiplayer/android/dump/script.json',encoding='utf-8'))
 q=sys.argv[1]

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 import struct, pickle, sys
 from capstone import *
 from capstone.arm64 import *

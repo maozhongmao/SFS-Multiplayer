@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 import sys
 sys.path.insert(0, '.')
 from binf import B

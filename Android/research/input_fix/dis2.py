@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
 """dis2.py -- capstone + script.json symbolizer for SFS 1.6.00.22 libil2cpp.so
 usage: python dis2.py 0xRVA [count]
 RVA == file offset in this build (.text VA 0x13BD4D0, il2cpp seg VA 0x166435C)

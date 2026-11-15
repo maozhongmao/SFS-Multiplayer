@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // scratch verification harness (not part of the repo deliverable)
 #include "protocol/codec.hpp"
 #include "protocol/handshake.hpp"

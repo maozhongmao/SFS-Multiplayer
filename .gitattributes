@@ -1,4 +1,34 @@
 # 只屏蔽历史遗留代码（其余代码照常参与 GitHub 语言统计）
+
+# —— Android 历史代码 ——
 android/src/v[0-9]*.c linguist-vendored=true
 android/src/v64.c linguist-vendored=false
+# 旧版逆向分析脚本与探针（历史产物，非当前实现）
+Android/research/** linguist-vendored=true
+# 旧版安装器 / 打补丁器（已被 patchapp 取代）
+Android/installer/** linguist-vendored=true
+Android/patcher/** linguist-vendored=true
+# 一次性工具与测试脚手架
+Android/tools/** linguist-vendored=true
+Android/tests/** linguist-vendored=true
+
+# —— 其他历史遗留 ——
 .audit/** linguist-vendored=true
+Plugin/aaaexample/** linguist-vendored=true
+Server/third_party/** linguist-vendored=true
+
+# —— 全项目通用历史目录（防止以后误提交） ——
+_quarantine/** linguist-vendored=true
+Rollback-Mods/** linguist-vendored=true
+Client/upstream-archive/** linguist-vendored=true
+Client/verdix-archive/** linguist-vendored=true
+
+# —— 二进制/产物（GitHub 不统计） ——
+*.apk binary
+*.so binary
+*.dll binary
+*.exe binary
+*.pdb binary
+*.zip binary
+*.png binary
+*.jpg binary

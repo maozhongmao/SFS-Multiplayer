@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 # build-one.ps1 - build ONE server target, clean readable errors.
 # Usage: build-one.ps1 -Target linux-armv7
 param([Parameter(Mandatory=$true)][string]$Target)

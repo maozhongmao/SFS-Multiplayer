@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 using System;
 using System.Net;
 using System.Threading.Tasks;

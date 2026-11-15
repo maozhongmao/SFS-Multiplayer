@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 # build-server-exp.ps1 - server EXP profile (armv7 musl static, ROM first).
 #
 # Why a separate script:

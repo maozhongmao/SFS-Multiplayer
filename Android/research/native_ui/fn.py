@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 from capstone import *
 import struct
 raw=open('D:/SFS-Pro/build/seller_libpatch.so','rb').read()

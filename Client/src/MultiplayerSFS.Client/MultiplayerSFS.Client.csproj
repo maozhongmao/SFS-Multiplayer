@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 ﻿<!--
   This Source Code Form is subject to the terms of the Mozilla Public
   License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -65,71 +64,3 @@
   </ItemGroup>
 </Project>
 
-=======
-﻿<!--
-  This Source Code Form is subject to the terms of the Mozilla Public
-  License, v. 2.0. If a copy of the MPL was not distributed with this
-  file, You can obtain one at https://mozilla.org/MPL/2.0/.
--->
-<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
-    <AssemblyName>SFS-Multiplayer-1.6-V2.1</AssemblyName>
-    <Version>2.1.0.0</Version>
-    <AssemblyVersion>2.1.0.0</AssemblyVersion>
-    <FileVersion>2.1.0.0</FileVersion>
-    <RootNamespace>MultiplayerSFS</RootNamespace>
-    <LangVersion>12.0</LangVersion>
-    <Nullable>disable</Nullable>
-    <ImplicitUsings>disable</ImplicitUsings>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <!-- 鍙岀増鏈細榛樿 v16锛?.6锛夛紱-p:GameVersion=v15 鍑?1.5 鍖咃紙鑰佺數鑴戯級銆?
-         v15 浼氭墦寮€ SFS15 鏉′欢缂栬瘧 + 鍒囧埌 refs/v15锛屽樊寮傚彧闆嗕腑鍦?3 涓枃浠讹紙瑙?Port15/PORT-NOTES.md锛夈€?-->
-    <GameVersion Condition="'$(GameVersion)' == ''">v16</GameVersion>
-    <GameReferences>$(MSBuildProjectDirectory)\..\..\refs\$(GameVersion)</GameReferences>
-    <DefineConstants Condition="'$(GameVersion)' == 'v15'">$(DefineConstants);SFS15</DefineConstants>
-    <!-- 浜х墿鐩綍锛?.6 涓?1.5 涓や釜鍖呴兘钀藉埌鍚屼竴涓?release 鐩綍锛堜笉鍐嶅弻鍐欏埌 artifacts/锛夈€?
-         娉ㄦ剰锛氫袱涓寘鍏辩敤鍚屼竴涓?OutputPath 鏃讹紝MSBuild 鐨勫閲忔竻鐞嗕細鎶婂彟涓€涓垹鎺夛紝
-         鎵€浠ュ嚭鍙屽寘蹇呴』銆屽垎鍒瀯寤?-> 鍚勮嚜鏆傚瓨 -> 鍐嶅悎骞躲€嶃€?-->
-    <AssemblyName Condition="'$(GameVersion)' == 'v15'">SFS-Multiplayer-1.5-V2.1</AssemblyName>
-    <AssemblyName Condition="'$(GameVersion)' != 'v15'">SFS-Multiplayer-1.6-V2.1</AssemblyName>
-    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>$(MSBuildProjectDirectory)\..\..\release-2.0.2.0\</OutputPath>
-    <!-- 鍚岀洰褰曚笅鐨?MultiplayerSFS.Common.Kcp 鏄嫭绔嬪伐绋嬶紝浣嗗畠宓屽湪鏈伐绋嬬洰褰曞唴锛?
-         榛樿婧愮爜閫氶厤浼氭妸瀹冪殑 obj/**/*.cs锛堝惈鑷姩鐢熸垚鐨?AssemblyInfo锛変篃缂栬瘧杩涙潵锛?
-         涓庢湰宸ョ▼鎵嬪啓鐨?Properties/AssemblyInfo.cs 鍐茬獊锛圕S0579 鐗规€ч噸澶嶏級銆?
-         鎺掗櫎鏁翠釜瀛愮洰褰曞強鍏?obj/bin銆?-->
-    <DefaultItemExcludes>$(DefaultItemExcludes);MultiplayerSFS.Common.Kcp\obj\**;MultiplayerSFS.Common.Kcp\bin\**</DefaultItemExcludes>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Costura.Fody" Version="5.7.0">
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
-    <!-- 鐜╁鍙～鍩熷悕鏃舵煡 SRV 鎷跨鍙ｇ敤銆侱nsClient 鐨?net472 鐩爣鍙緷璧?System.Buffers锛?
-         涓よ€呴兘鐢?Costura 鍐呭祵锛屽彂甯冪墿浠嶇劧鏄崟涓?dll銆?-->
-    <PackageReference Include="DnsClient" Version="1.8.0" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="Assembly-CSharp" HintPath="$(GameReferences)\Assembly-CSharp.dll" Private="false" />
-    <Reference Include="Assembly-CSharp-firstpass" HintPath="$(GameReferences)\Assembly-CSharp-firstpass.dll" Private="false" />
-    <Reference Include="0Harmony" HintPath="$(GameReferences)\0Harmony.dll" Private="false" />
-    <Reference Include="Lidgren.Network" HintPath="$(GameReferences)\Lidgren.Network.dll" Private="true" />
-    <Reference Include="UITools" HintPath="$(GameReferences)\UITools.dll" Private="false" />
-    <Reference Include="Unity.TextMeshPro" HintPath="$(GameReferences)\Unity.TextMeshPro.dll" Private="false" />
-    <Reference Include="UnityEngine" HintPath="$(GameReferences)\UnityEngine.dll" Private="false" />
-    <Reference Include="UnityEngine.CoreModule" HintPath="$(GameReferences)\UnityEngine.CoreModule.dll" Private="false" />
-    <Reference Include="UnityEngine.InputLegacyModule" HintPath="$(GameReferences)\UnityEngine.InputLegacyModule.dll" Private="false" />
-    <Reference Include="UnityEngine.IMGUIModule" HintPath="$(GameReferences)\UnityEngine.IMGUIModule.dll" Private="false" />
-    <Reference Include="UnityEngine.Physics2DModule" HintPath="$(GameReferences)\UnityEngine.Physics2DModule.dll" Private="false" />
-    <Reference Include="UnityEngine.TextRenderingModule" HintPath="$(GameReferences)\UnityEngine.TextRenderingModule.dll" Private="false" />
-    <Reference Include="UnityEngine.UI" HintPath="$(GameReferences)\UnityEngine.UI.dll" Private="false" />
-    <Reference Include="UnityEngine.UnityAnalyticsModule" HintPath="$(GameReferences)\UnityEngine.UnityAnalyticsModule.dll" Private="false" />
-  </ItemGroup>
-</Project>
-
->>>>>>> backup-local-897

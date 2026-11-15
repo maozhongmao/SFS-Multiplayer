@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
 // multiplayersfs probe #2: reach libil2cpp from our injected .so (no libc link; @extern + lazy binding)
 const RTLD_NOW: c_int = 2;
 const FnDlopen = *const fn ([*:0]const u8, c_int) callconv(.c) ?*anyopaque;

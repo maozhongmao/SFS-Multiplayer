@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: MPL-2.0
 # 全量构建服务端：
 #   arm-linux-gnueabihf -> build/zig-arm/sfs-server-kcp-arm   （目标设备 9806 生产）
 #   x86_64-windows-gnu  -> build/zig-win/sfs-server-kcp-win.exe（本机测试）

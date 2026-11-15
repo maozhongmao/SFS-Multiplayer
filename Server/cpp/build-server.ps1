@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 # Build the C++ server (sfs-server-kcp) in one shot.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File build-server.ps1 [-Clean]
 param([switch]$Clean)

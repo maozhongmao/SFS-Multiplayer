@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MPL-2.0
 # build-release.ps1 - produce the complete release set in one shot.
 #
 # Why this script exists:

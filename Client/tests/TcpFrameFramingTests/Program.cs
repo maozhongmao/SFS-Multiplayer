@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 // TcpFrame 编解码回归测试（直接引用生产源码 TcpFrame.cs）
 // 契约：Encode(frame) = [bodyLength(4)][kind(1)][seq(4)][bits(4)][payload]，DecodeBody 只接收 body 部分。
 // 重点验证复用缓冲区版本的 DecodeBody(body, length) 与精确长度版本等价。
