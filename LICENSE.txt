@@ -378,7 +378,7 @@ Additional Terms (Project Supplementary Notes, Not Original Mozilla Text)
 
 1. Directory-specific licensing: The Android/ directory of this repository (mobile multiplayer patch: injection layer libsfsmp.so, libmain.so trampoline, patch installer) is not governed by this MPL text; instead, it is released under the GNU General Public License v3.0 or later. The complete terms are in Android/LICENSE. Each source file under that directory carries SPDX-License-Identifier: GPL-3.0-or-later in its header.
 
-2. All other directories (Client/, Server/, Plugin/, etc.) are released under the Mozilla Public License 2.0 (i.e., this text), and each source file carries SPDX-License-Identifier: MPL-2.0 in its header.
+2. Other directories (Client/, Server/, etc.) are released under the Mozilla Public License 2.0 (i.e., this text), and each source file carries SPDX-License-Identifier: MPL-2.0 in its header.
 
 3. This repository does not contain or distribute the Spaceflight Simulator game itself, game assets, or decompiled code; the mobile patch only acts on the legitimate copy of the game already installed on the user's own device.
 
