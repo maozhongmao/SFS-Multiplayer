@@ -75,3 +75,39 @@
 
 文件读写、网络/套接字、进程/线程、动态源码求值（`eval` 由字节码-only 策略天然没有入口）、
 模块加载、系统时间以外的高精度计时、任何未在 §2 列出的宿主调用。
+
+
+---
+
+## 6. 沙箱已移除（2026-11-08）
+
+- 能力位（capabilities）不再检查；插件可调用所有已注册 API。
+- 内存、栈、指令预算、每轮 API 调用次数不再限制。
+- 新增文件 API：`sfs.readFile(path)`、`sfs.writeFile(path, text)`、`sfs.listDir(path)`。
+- 仍保留参数边界（玩家 id、文本长度/控制字符、坐标有限数、字节码格式），这属于防误用，不是安全隔离。
+- **只运行可信插件；风险由服务器管理员承担。**
+
+
+## 7. 2026-11-08 API 扩展
+
+### 元数据与生命周期
+- `sfs.plugin`：`{ id, name, author, version, minServerVersion }`
+- 全局可选函数：`onLoad()`、`onUnload()`、`onTick()`；`onTick` 与事件同节拍，每秒一次。
+
+### 文件 API
+- `sfs.readFile(path)`
+- `sfs.writeFile(path, text)`
+- `sfs.listDir(path)`
+- `sfs.deleteFile(path)`
+- `sfs.mkdir(path)`
+- `sfs.exists(path)`
+- `sfs.renameFile(from, to)`
+
+### 交互 API
+- `sfs.askUser(question)`：向服务端控制台提问并返回一行输入。
+
+### 仍缺少（对比同行）
+- 原始包级钩子：`onPacketReceived/onPacketSent/onUnhandledPacket`
+- 面板交互回传：`onPanelReply`
+- 自定义消息拦截：`onMessageHandled`
+- 整枚火箭完整状态写入：`setRocketState`

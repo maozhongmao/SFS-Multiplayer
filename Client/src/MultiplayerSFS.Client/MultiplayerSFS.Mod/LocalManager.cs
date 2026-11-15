@@ -502,6 +502,37 @@ public static class LocalManager
     private const double NearbySnapshotRangeMeters = 10000.0;
     private static float nextNearbySnapshotTime;
 
+    private static readonly Dictionary<int, string> lastSentRocketName = new Dictionary<int, string>();
+    private static float nextRenamePollTime;
+
+    // PC 端原来根本没有 Packet_RenameRocket 的发送点，手机永远收不到改名。
+    // 这里轮询自己正在控制/有权威的火箭名，变化才发，避免每帧刷包。
+    private static void PollLocalRocketRenames()
+    {
+        if (syncedRockets == null || syncedRockets.Count == 0) return;
+        if (Time.unscaledTime < nextRenamePollTime) return;
+        nextRenamePollTime = Time.unscaledTime + 0.5f;
+        if (Player == null) return;
+        int controlled = Player.controlledRocket.Value;
+        foreach (KeyValuePair<int, LocalRocket> kvp in syncedRockets)
+        {
+            int id = kvp.Key;
+            LocalRocket lr = kvp.Value;
+            if (lr == null || lr.rocket == null) continue;
+            if (id != controlled || !updateAuthority.Contains(id)) continue;
+            string name = lr.rocket.rocketName ?? string.Empty;
+            string previous;
+            if (lastSentRocketName.TryGetValue(id, out previous) && previous == name) continue;
+            lastSentRocketName[id] = name;
+            ClientManager.SendPacket(new Packet_RenameRocket
+            {
+                RocketId = id,
+                RocketName = name
+            }, (NetDeliveryMethod)67);
+            UnityEngine.Debug.Log($"[SFS-MP] rename sent: id={id} name='{name}'");
+        }
+    }
+
     public static void Update()
     {
         // 远端爆炸特效预算每帧重置（见 AllowRemoteExplosion）
@@ -549,6 +580,7 @@ public static class LocalManager
             nextNearbySnapshotTime = Time.unscaledTime + NearbySnapshotIntervalSeconds;
             RequestNearbyRocketSnapshots();
         }
+        PollLocalRocketRenames();
         TickForcedRebuild();
         if (TraceSink.FrameObserver == null) TraceSink.FrameObserver = DebugTrace.Frame;
         DebugTrace.Tick();
@@ -1615,6 +1647,41 @@ public static class LocalManager
                 UnityEngine.Debug.Log("[SFS-MP] structure mismatch on own rocket " + packet.GlobalId + "; re-pushing local structure to server.");
                 return;
             }
+            // 【Batch A】新结构是本地结构的纯子集（只少了零件，没有换号/新增）时，
+            // 不要再整枚 Destroy/Spawn：那会带来约 1 秒的“火箭消失”。直接原地销毁多余零件即可。
+            // 换号/拆分/新增仍然走重建，保证结构最终一致。
+            bool incomingSubset = structureMismatch
+                && existing != null && existing.parts != null && packet.Rocket != null && packet.Rocket.parts != null
+                && incomingParts >= 0 && liveParts >= 0 && incomingParts <= liveParts;
+            if (incomingSubset)
+            {
+                foreach (KeyValuePair<int, PartState> kv in packet.Rocket.parts)
+                {
+                    if (!existing.parts.TryGetValue(kv.Key, out Part localPart) || localPart == null)
+                    {
+                        incomingSubset = false;
+                        break;
+                    }
+                }
+            }
+            if (incomingSubset)
+            {
+                var doomed = new List<Part>();
+                foreach (KeyValuePair<int, Part> kv in existing.parts)
+                {
+                    if (kv.Value != null && !packet.Rocket.parts.ContainsKey(kv.Key)) doomed.Add(kv.Value);
+                }
+                for (int i = 0; i < doomed.Count; i++)
+                {
+                    if (doomed[i] != null)
+                        doomed[i].DestroyPart(false, updateJoints: true, (DestructionReason)4);
+                }
+                existing.PruneDestroyedParts();
+                launchpadStateDirty = true;
+                UnityEngine.Debug.Log($"[SFS-MP] structure subset on rocket {packet.GlobalId}: applied in place (live={liveParts} incoming={incomingParts}, removed={doomed.Count}); no rebuild.");
+                return;
+            }
+
             bool needsRebuild = existing == null || existing.rocket == null || packet.Rocket == null || structureMismatch;
             // 强制窗口（F8「重同步世界」）：远端火箭一律整枚重建 —— 这是唯一能把零件数据真正拉回来的动作。
             // 必须跳过"本端就是权威"的那枚，否则会拿服务端的旧副本覆盖自己正在模拟的火箭。

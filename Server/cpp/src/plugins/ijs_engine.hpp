@@ -52,6 +52,12 @@ public:
     // 一轮结束后的回收（QuickJS: JS_RunGC）。
     virtual void collect_garbage() = 0;
 
+    // 元数据：装载前由宿主下发，插件可通过 sfs.plugin 读取。
+    virtual void set_plugin_info(const char*, const char*, const char*, const char*) {}
+
+    // 生命周期钩子：onLoad / onUnload / onTick；没有定义时返回 true。
+    virtual bool call_hook(const char*) { return true; }
+
     // 释放运行时；析构前必须调用（析构兜底一次）。
     virtual void unload() = 0;
 };

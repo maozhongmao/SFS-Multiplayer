@@ -15,6 +15,7 @@
 #include "plugins/ijs_engine.hpp"  // 含 plugin_types.hpp ⇒ HostApi 定义可见
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -31,6 +32,29 @@ public:
 
     const char* name() const override { return "quickjs-ng"; }
     void set_host_api(const HostApi& api) override { api_ = api; }
+
+    void set_plugin_info(const char* name, const char* author, const char* version,
+                         const char* min_server_version) override {
+        plugin_name_ = name ? name : "";
+        plugin_author_ = author ? author : "";
+        plugin_version_ = version ? version : "";
+        plugin_min_version_ = min_server_version ? min_server_version : "";
+    }
+
+    bool call_hook(const char* hook) override {
+        if (ctx_ == nullptr || hook == nullptr) return true;
+        JSValue fn = JS_UNDEFINED;
+        if (std::strcmp(hook, "onLoad") == 0) fn = on_load_;
+        else if (std::strcmp(hook, "onUnload") == 0) fn = on_unload_;
+        else if (std::strcmp(hook, "onTick") == 0) fn = on_tick_;
+        else return true;
+        if (!JS_IsFunction(ctx_, fn)) return true;
+        JSValue ret = JS_Call(ctx_, fn, JS_UNDEFINED, 0, nullptr);
+        const bool ok = !JS_IsException(ret);
+        JS_FreeValue(ctx_, ret);
+        if (!ok) { JSValue ex = JS_GetException(ctx_); JS_FreeValue(ctx_, ex); }
+        return ok;
+    }
 
     bool load_bytecode(const std::uint8_t* data, std::size_t size) override {
         if (data == nullptr || size == 0) return false;
@@ -66,6 +90,11 @@ public:
             }
         }
         on_event_ = fn;
+        JSValue global = JS_GetGlobalObject(ctx_);
+        on_load_   = JS_GetPropertyStr(ctx_, global, "onLoad");
+        on_unload_ = JS_GetPropertyStr(ctx_, global, "onUnload");
+        on_tick_   = JS_GetPropertyStr(ctx_, global, "onTick");
+        JS_FreeValue(ctx_, global);
         return true;
     }
 
@@ -93,9 +122,16 @@ public:
 
     void collect_garbage() override { if (rt_ != nullptr) JS_RunGC(rt_); }
     void unload() override {
-        if (ctx_ != nullptr) { JS_FreeContext(ctx_); ctx_ = nullptr; }
+        if (ctx_ != nullptr) { call_hook("onUnload"); }
+        if (ctx_ != nullptr) {
+            JS_FreeValue(ctx_, on_event_); on_event_ = JS_UNDEFINED;
+            JS_FreeValue(ctx_, on_load_);   on_load_ = JS_UNDEFINED;
+            JS_FreeValue(ctx_, on_unload_); on_unload_ = JS_UNDEFINED;
+            JS_FreeValue(ctx_, on_tick_);   on_tick_ = JS_UNDEFINED;
+            JS_FreeContext(ctx_); ctx_ = nullptr;
+        }
         if (rt_ != nullptr) { JS_FreeRuntime(rt_); rt_ = nullptr; }
-        on_event_ = JS_UNDEFINED; used_ = 0;
+        used_ = 0;
     }
 
 private:
@@ -216,9 +252,108 @@ private:
         return JS_NewInt32(ctx, rc);
     }
 
+    // ---- 文件 API（沙箱移除后开放；路径与内容都由服务端管理员自行负责） ----
+    static JSValue call_string_cap(JSContext* ctx, QuickJsEngine* s, const char* op,
+                                   const char* arg, std::size_t cap) {
+        if (s == nullptr || s->api_.call == nullptr) return JS_NewInt32(ctx, -1);
+        std::vector<char> buf(cap, 0);
+        const std::int32_t rc = s->api_.call(s->api_.ctx, op, arg, buf.data(),
+                                             static_cast<std::int32_t>(buf.size()));
+        return (rc == 0) ? JS_NewString(ctx, buf.data()) : JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_read_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        const char* path = JS_ToCString(ctx, argv[0]);
+        if (path == nullptr) return JS_NewInt32(ctx, -2);
+        JSValue v = call_string_cap(ctx, self(ctx), "readFile", path, 65536);
+        JS_FreeCString(ctx, path);
+        return v;
+    }
+    static JSValue js_write_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 2) return JS_NewInt32(ctx, -2);
+        const char* path = JS_ToCString(ctx, argv[0]);
+        const char* text = JS_ToCString(ctx, argv[1]);
+        if (path == nullptr || text == nullptr) {
+            if (path) JS_FreeCString(ctx, path);
+            if (text) JS_FreeCString(ctx, text);
+            return JS_NewInt32(ctx, -2);
+        }
+        std::string spec(path); spec += '|'; spec += text;
+        JS_FreeCString(ctx, path); JS_FreeCString(ctx, text);
+        QuickJsEngine* s = self(ctx);
+        if (s == nullptr || s->api_.call == nullptr) return JS_NewInt32(ctx, -1);
+        return JS_NewInt32(ctx, s->api_.call(s->api_.ctx, "writeFile", spec.c_str(), nullptr, 0));
+    }
+    static JSValue js_ask_user(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        const char* q = JS_ToCString(ctx, argv[0]);
+        if (q == nullptr) return JS_NewInt32(ctx, -2);
+        QuickJsEngine* s = self(ctx);
+        std::string spec(q);
+        JS_FreeCString(ctx, q);
+        if (s == nullptr || s->api_.call == nullptr) return JS_NewInt32(ctx, -1);
+        std::vector<char> buf(1024, 0);
+        std::int32_t rc = s->api_.call(s->api_.ctx, "askUser", spec.c_str(), buf.data(),
+                                       static_cast<std::int32_t>(buf.size()));
+        return (rc == 0) ? JS_NewString(ctx, buf.data()) : JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_delete_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        const char* path = JS_ToCString(ctx, argv[0]);
+        if (path == nullptr) return JS_NewInt32(ctx, -2);
+        std::int32_t rc = do_call(self(ctx), "deleteFile", path);
+        JS_FreeCString(ctx, path);
+        return JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_mkdir(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        const char* path = JS_ToCString(ctx, argv[0]);
+        if (path == nullptr) return JS_NewInt32(ctx, -2);
+        std::int32_t rc = do_call(self(ctx), "mkdir", path);
+        JS_FreeCString(ctx, path);
+        return JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_exists(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        const char* path = JS_ToCString(ctx, argv[0]);
+        if (path == nullptr) return JS_NewInt32(ctx, -2);
+        std::int32_t rc = do_call(self(ctx), "exists", path);
+        JS_FreeCString(ctx, path);
+        return JS_NewInt32(ctx, rc);
+    }
+    static JSValue js_rename_file(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 2) return JS_NewInt32(ctx, -2);
+        const char* from = JS_ToCString(ctx, argv[0]);
+        const char* to = JS_ToCString(ctx, argv[1]);
+        if (from == nullptr || to == nullptr) {
+            if (from) JS_FreeCString(ctx, from);
+            if (to) JS_FreeCString(ctx, to);
+            return JS_NewInt32(ctx, -2);
+        }
+        std::string spec(from); spec += '|'; spec += to;
+        JS_FreeCString(ctx, from); JS_FreeCString(ctx, to);
+        return JS_NewInt32(ctx, do_call(self(ctx), "renameFile", spec.c_str()));
+    }
+
+    static JSValue js_list_dir(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+        if (argc < 1) return JS_NewInt32(ctx, -2);
+        const char* path = JS_ToCString(ctx, argv[0]);
+        if (path == nullptr) return JS_NewInt32(ctx, -2);
+        JSValue v = call_string_cap(ctx, self(ctx), "listDir", path, 65536);
+        JS_FreeCString(ctx, path);
+        return v;
+    }
+
     void install_host_functions() {
         JSValue global = JS_GetGlobalObject(ctx_);
         JSValue sfs = JS_NewObject(ctx_);
+        JSValue pinfo = JS_NewObject(ctx_);
+        JS_SetPropertyStr(ctx_, pinfo, "id", JS_NewString(ctx_, plugin_name_.c_str()));
+        JS_SetPropertyStr(ctx_, pinfo, "name", JS_NewString(ctx_, plugin_name_.c_str()));
+        JS_SetPropertyStr(ctx_, pinfo, "author", JS_NewString(ctx_, plugin_author_.c_str()));
+        JS_SetPropertyStr(ctx_, pinfo, "version", JS_NewString(ctx_, plugin_version_.c_str()));
+        JS_SetPropertyStr(ctx_, pinfo, "minServerVersion", JS_NewString(ctx_, plugin_min_version_.c_str()));
+        JS_SetPropertyStr(ctx_, sfs, "plugin", pinfo);
         JS_SetPropertyStr(ctx_, sfs, "log", JS_NewCFunction(ctx_, &QuickJsEngine::js_log, "log", 1));
         JS_SetPropertyStr(ctx_, sfs, "sendMessage", JS_NewCFunction(ctx_, &QuickJsEngine::js_send_message, "sendMessage", 2));
         JS_SetPropertyStr(ctx_, sfs, "readRocket", JS_NewCFunction(ctx_, &QuickJsEngine::js_read_rocket, "readRocket", 1));
@@ -233,6 +368,15 @@ private:
         JS_SetPropertyStr(ctx_, sfs, "kick", JS_NewCFunction(ctx_, &QuickJsEngine::js_kick, "kick", 2));
         JS_SetPropertyStr(ctx_, sfs, "clearDebris", JS_NewCFunction(ctx_, &QuickJsEngine::js_clear_debris, "clearDebris", 1));
         JS_SetPropertyStr(ctx_, sfs, "setTimeScale", JS_NewCFunction(ctx_, &QuickJsEngine::js_set_time_scale, "setTimeScale", 1));
+        // 文件类（沙箱移除后新增）
+        JS_SetPropertyStr(ctx_, sfs, "readFile", JS_NewCFunction(ctx_, &QuickJsEngine::js_read_file, "readFile", 1));
+        JS_SetPropertyStr(ctx_, sfs, "writeFile", JS_NewCFunction(ctx_, &QuickJsEngine::js_write_file, "writeFile", 2));
+        JS_SetPropertyStr(ctx_, sfs, "listDir", JS_NewCFunction(ctx_, &QuickJsEngine::js_list_dir, "listDir", 1));
+        JS_SetPropertyStr(ctx_, sfs, "deleteFile", JS_NewCFunction(ctx_, &QuickJsEngine::js_delete_file, "deleteFile", 1));
+        JS_SetPropertyStr(ctx_, sfs, "mkdir", JS_NewCFunction(ctx_, &QuickJsEngine::js_mkdir, "mkdir", 1));
+        JS_SetPropertyStr(ctx_, sfs, "exists", JS_NewCFunction(ctx_, &QuickJsEngine::js_exists, "exists", 1));
+        JS_SetPropertyStr(ctx_, sfs, "renameFile", JS_NewCFunction(ctx_, &QuickJsEngine::js_rename_file, "renameFile", 2));
+        JS_SetPropertyStr(ctx_, sfs, "askUser", JS_NewCFunction(ctx_, &QuickJsEngine::js_ask_user, "askUser", 1));
         JS_SetPropertyStr(ctx_, global, "sfs", sfs);
         JS_FreeValue(ctx_, global);
     }
@@ -297,6 +441,10 @@ private:
     JSRuntime* rt_ = nullptr;
     JSContext* ctx_ = nullptr;
     JSValue on_event_ = JS_UNDEFINED;
+    JSValue on_load_ = JS_UNDEFINED;
+    JSValue on_unload_ = JS_UNDEFINED;
+    JSValue on_tick_ = JS_UNDEFINED;
+    std::string plugin_name_, plugin_author_, plugin_version_, plugin_min_version_;
     HostApi api_{};
     std::uint64_t budget_ = 0;
     std::uint64_t used_ = 0;

@@ -33,8 +33,12 @@ namespace sfs::plugins {
 // 因为它会进日志 (TMP 无中文字形)。
 struct PluginDescriptor {
     std::string id;
-    std::uint32_t capabilities = kCapNone;
-    PluginLimits limits{};
+    std::string name;                  // 展示名
+    std::string author;
+    std::string version;
+    std::string minimum_server_version;
+    std::uint32_t capabilities = kCapNone;   // 兼容字段；沙箱移除后不再检查
+    PluginLimits limits{};                    // 兼容字段；沙箱移除后不再限制
     std::vector<std::uint8_t> bytecode;  // 编译后的字节码, 不是源码
 };
 

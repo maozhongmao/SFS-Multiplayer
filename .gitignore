@@ -7,3 +7,9 @@ obj/
 *.so
 *.exe
 !Server/cpp/build/verify-out/*.exe
+
+# 逆向 dump/参考代码，严禁入库
+_quarantine/
+# 补丁构建产物/底包 APK
+android/patchapp/build/
+

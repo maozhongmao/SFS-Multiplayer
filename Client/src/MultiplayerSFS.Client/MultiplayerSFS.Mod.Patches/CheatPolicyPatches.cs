@@ -20,6 +20,7 @@ namespace MultiplayerSFS.Mod.Patches;
 // 本文件只在策略要求时**加强**限制，从不放宽，也不会因为世界本来就不允许作弊而崩溃
 // （所有字段访问都有 null 保护）。
 
+#if !SFS15   // 1.5 的 SandboxSettings 没有 OnOpen/UpdatePreventUse 等成员，这个补丁类整体跳过
 [HarmonyPatch(typeof(SandboxSettings))]
 internal static class CheatPolicy_SandboxSettings
 {
@@ -189,6 +190,7 @@ internal static class CheatPolicy_SandboxSettings
 		return false;   // 跳过会抛 NullReferenceException 的原方法
 	}
 }
+#endif
 
 // 世界总闸 AllowsCheats —— 这是【作弊面板能不能出现】的第一道门。
 //

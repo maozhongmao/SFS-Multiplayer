@@ -21,7 +21,7 @@
 namespace sfs::protocol {
 
 // 服务端对外报的版本号。改服务端功能时跟着客户端发布号走（前两位必须一致）。
-inline constexpr std::string_view kServerVersionString = "1.3.3";
+inline constexpr std::string_view kServerVersionString = "2.1.0";
 
 constexpr std::size_t kServerVersionStringMaxBytes = 64;
 

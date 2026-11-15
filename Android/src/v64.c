@@ -2,7 +2,7 @@
 // v43: 参考实现路线 — NOJ drawer Open()+Draw* ; v41: probe mode — no overlay button; auto-summon the cloned '多人联机' button when the main menu is ready; click -> login page.
 //   * the direct UnityEngine.Object.Instantiate call is DEAD (v28/v29: it dies inside libunity
 //     because an internal lookup returns NULL) - so let the game's own managed code do it.
-//   * panel class = obfuscated NOJZIZCFSEXSUEEX  = the SFS.UI.ModGUI window class;
+//   * panel class = obfuscated CLCPKKVBMCAKFMPN  = the SFS.UI.ModGUI window class;
 //     methods keep their names: DrawFullButton(int,string,Action,bool) RVA 0x18DDCF8.
 //   * keeps the v22/v26 IL2CPP plumbing + WorldTime.Update main-thread hook
 //   * adds the v27 Android overlay button, but the button does NOT draw our UI any more:
@@ -286,6 +286,7 @@ static int g_tiWasOpen = 0;
 static volatile int g_installed = 0;
 static volatile int g_ui_ready = 0;
 static int g_ticks = 0;
+static time_t g_t0 = 0;   /* v157: 启动时刻，用来按「经过多少秒」而不是 tick 数判断 Unity 是否ready */
 
 static void u16_to_ascii(void* s, char* out, int cap){
     out[0]=0; if(!s) return;
@@ -353,9 +354,9 @@ static void* g_srcBtn=NULL; static void* g_mEvtInvoke=NULL; static int g_autoSta
 /* ---- v64: enter the world through the game's own scene loader ---- */
 static void* g_sceneLoaderCls=NULL, *g_typeSceneLoader=NULL, *g_mLoadWorldScene=NULL, *g_mLoadHubScene=NULL;
 /* v100: 进世界前把视角钉到发射台（PC 端 DivertLoading 同款：WorldView.main.SetViewLocation(Base.planetLoader.spaceCenter.LaunchPadLocation)）
- * WorldView = SFS.World.ZIMVTWPJZBTPPXSR，静态 main @0x0，SetViewLocation(Location) RVA 0x16CC208
- * Base = SFS.RQOFTSKFXWRDBQCA，planetLoader @0x40
- * planetLoader = SFS.WorldBase.YXHFAUIATGCKNHYQ，spaceCenter @0x60
+ * WorldView = SFS.World.XAXCCQNDFGKVWDLV，静态 main @0x0，SetViewLocation(Location) RVA 0x16CC208
+ * Base = SFS.JFNHOQBWNYGSGXGG，planetLoader @0x40
+ * planetLoader = SFS.WorldBase.QCHSPBTJBULPIBRF，spaceCenter @0x60
  * SpaceCenterData.LaunchPadLocation getter RVA 0x17AC594 */
 static void* g_worldViewCls=NULL, *g_worldViewMainField=NULL, *g_mSetViewLocation=NULL;
 static void* g_baseCls=NULL, *g_typeBase=NULL;
@@ -374,7 +375,7 @@ static int   g_offPcPlayer=-1, g_offPcHasCtrl=-1, g_offPcCamDist=-1;
 static int   player_controller_resolve(void);
 /* v109: 找"我自己的那枚火箭"时的诊断计数（只在变化时打日志，避免刷屏） */
 static int g_pickLogPrev=-99, g_pickLogN=-1;
-/* v70: 官方进世界链路 -> SFS.WorldBase.FAELUUBBVIPEYYXS.EnterWorld(string worldName, Action cb) RVA 0x16B1BD0 */
+/* v70: 官方进世界链路 -> SFS.WorldBase.JRMHWFEIUSAIOARX.EnterWorld(string worldName, Action cb) RVA 0x16B1BD0 */
 static void* g_wbCls=NULL, *g_mEnterWorld=NULL;
 static volatile int g_enterTried=0, g_enterWait=0, g_enterFallback=0;
 static volatile int g_tmpWorldMade=0, g_loadWorldDone=0;   /* v97: 临时沙盒世界 / 已切过场景 */
@@ -966,7 +967,7 @@ static void log_tree(void* tr, const char* tag){
 }
 
 
-/* ---------- v44b: native text-input dialog (DEOTNULUBFZWSSUA.textInput) ---------- */
+/* ---------- v44b: native text-input dialog (TFQAGVWYKGLCWQSF.textInput) ---------- */
 static void* (*g_mgp2)(void*, uint32_t);
 static void* (*g_cfit)(void*);
 static void* make_del(void*, void*);
@@ -1270,7 +1271,7 @@ static void native_text_input(void){
         if(r && !e) ((void**)((char*)arr+0x20))[i]=r;
         snprintf(b,sizeof(b),"v44: elem[%d]=%p exc=%p\n", i, r, e); log_app(b); e=NULL;
         if(r && i==2 && g_mSetContentType){    /* Password: contentType=7 -> 圆点遮蔽 */
-            void* box = *(void**)((char*)r + 0x30);        /* TUXXAURTZSIFPXTZ */
+            void* box = *(void**)((char*)r + 0x30);        /* BEDZRJNYAMZNCWLR */
             void* tmp = box ? *(void**)((char*)box + 0x28) : NULL;  /* TMP_InputField */
             if(tmp){ int32_t v=7; void* p1[1]={&v}; void* e2=NULL;
                 g_ri(g_mSetContentType, tmp, p1, &e2);
@@ -2004,7 +2005,7 @@ static void v39_tramp_builder(void* a, void* b, void* c, void* d)
         if (!o) continue;
         k = g_mObjGetClass ? g_mObjGetClass(o) : NULL;
         kn = (k && g_mClassGetName) ? g_mClassGetName(k) : NULL;
-        if (kn && strstr(kn, "NOJZIZCFSEXSUEEX")) { v39_build(o); return; }
+        if (kn && strstr(kn, "CLCPKKVBMCAKFMPN")) { v39_build(o); return; }
     }
     v39_build(a ? a : b);
 }
@@ -2090,7 +2091,7 @@ static void native_window_test(void)
  * 所以点按钮时我们做两件事：
  *   1) 连服务器（地址只取玩家在弹窗里填的值；没填就提示回去填，绝不自动连）
  *   2) 直接请游戏自己的场景加载器加载世界场景：
- *      SFS.USPVHOMQUKUGZPLU.LoadWorldScene(bool)  RVA 0x16EE994  
+ *      SFS.QFGSESNBNSUTRFTS.LoadWorldScene(bool)  RVA 0x16EE994  
  *      同一个类里还有 LoadHomeScene / LoadHubScene / LoadBuildScene，说明它就是场景切换总入口，
  *      世界卡片上的「开始游戏」背后调的就是它。调用走 il2cpp_runtime_invoke(实例, 参数)，
  *      不碰 methodPointer，也不手搓委托。
@@ -2482,7 +2483,7 @@ static void* noj_pick(void* a, void* b){
         void* k = *(void**)p;
         if ((uintptr_t)k < 0x1000 || ((uintptr_t)k >> 48)) continue;
         const char* kn = g_mClassGetName ? g_mClassGetName(k) : NULL;
-        if (kn && strstr(kn, "NOJZIZCFSEXSUEEX")) return p;
+        if (kn && strstr(kn, "CLCPKKVBMCAKFMPN")) return p;
         if (!kn && g_nojCls2 && k == g_nojCls2) return p;
     }
     return NULL;
@@ -2578,7 +2579,7 @@ static void probe_now_check(void){
 
 /* ---- v70: 让游戏自己去装「真世界」 ------------------------------------------
  * 硬调 LoadWorldScene 只切场景，行星/存档没装 ⇒ 每帧 NullReferenceException（Location.get_Height），
- * 时间停住、汉堡菜单点不动。改用 SFS.WorldBase.FAELUUBBVIPEYYXS.EnterWorld(worldName, cb)：
+ * 时间停住、汉堡菜单点不动。改用 SFS.WorldBase.JRMHWFEIUSAIOARX.EnterWorld(worldName, cb)：
  * 它就是世界卡片「开始游戏」背后的成品链路（读 Saving/Worlds/<名> 的存档 + 星系）。
  */
 /* ---- v97: 存档根目录动态探测 -------------------------------------------------
@@ -2709,7 +2710,7 @@ static int enter_world_official(void){
 /* ================= v74: 在手机端生成远端火箭 =================
  * 数据来源：mp_net.c 解出的 CreateRocket 整棵零件树（mp_types.h: mp_rrocket_t）。
  * 生成方式：手工填一个 RocketSave，再调游戏自己的
- *   SFS.World.WQPAXLGGCOAUZEOA.LoadRocket(RocketSave, out bool)   RVA 0x18F31D8
+ *   SFS.World.VGMIZZYPDOAGCGOS.LoadRocket(RocketSave, out bool)   RVA 0x18F31D8
  * 让游戏自己建零件/关节/分级，避免我们手工拼 Part 组件。
  * 偏移依据 dump: RocketSave 0x10/0x18/0x20/0x24/0x28/0x2C/0x30/0x38/0x40/0x48、
  * PartSave 0x10..0x48、JointSave 0x10/0x14、StageSave 0x10/0x18、LocationData 0x10/0x18/0x28。
@@ -3636,7 +3637,7 @@ static void hook_update(void* self){
 }
 
 /* ================= v30: hand the callback to the game's own button factory =================
- * Evidence : class NOJZIZCFSEXSUEEX : MonoBehaviour, fields menuHolder 0x20,
+ * Evidence : class CLCPKKVBMCAKFMPN : MonoBehaviour, fields menuHolder 0x20,
  * fullButtonPrefab 0x90, buttonPrefab 0x88, List<...> 0x98; methods DrawFullButton(int,string,Action,bool)
  * RVA 0x18DDCF8, DrawButton 0x18DD1D0, DrawTitle 0x18DD5D4, DrawText 0x18DDC08, Open 0x18DD724,
  * Close 0x18DC824.  PC mods reach the same class through SFS.UI.ModGUI (absent on mobile: 0 hits).
@@ -3895,6 +3896,7 @@ static void install_overlay(JNIEnv* env){
 
 JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeInit(JNIEnv* env, jclass cls, jobject act){
     log_app("sfsmp 2.0.1.0: nativeInit called\n");
+    g_t0 = time(NULL);
     if (act) {
         jclass ac = (*env)->GetObjectClass(env, act);
         if (ac) {
@@ -3921,12 +3923,12 @@ JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeInit(JNIEnv* env, jcla
 JNIEXPORT void JNICALL Java_com_sfsmp_bridge_Bridge_nativeTick(JNIEnv* env, jclass cls){
     g_ticks++;
     if (g_promptEp) { g_promptEp = 0; set_label(env, "请先填写服务器地址（IP:端口），再点连接"); }
-    if (g_ticks == 1) {
-        if (g_dataDir[0]) {
+    if (g_ticks == 1 || (g_t0 && time(NULL) - g_t0 >= 8 && !g_decor)) {   /* v157: 按时间判断 */
+        if (g_ticks == 1 && g_dataDir[0]) {
             mkdir(g_dataDir, 0770);
             { char sd[224]; snprintf(sd, sizeof(sd), "%s/Saving", g_dataDir); mkdir(sd, 0770); }
         }
-        if (!g_decor && g_activity) {          /* v144: Unity 起来后再取 decor 作为 postDelayed 的宿主 */
+        if (g_t0 && time(NULL) - g_t0 >= 8 && !g_decor && g_activity) {   /* v157: 启动 8 秒后才取 decor */
             jclass cAct = (*env)->GetObjectClass(env, g_activity);
             jmethodID mWin = cAct ? (*env)->GetMethodID(env, cAct, "getWindow", "()Landroid/view/Window;") : NULL;
             jobject win = mWin ? (*env)->CallObjectMethod(env, g_activity, mWin) : NULL;
@@ -4068,7 +4070,7 @@ static void* worker(void* arg){
     void* coreImg=gi(coreA);
     char b[260];
 
-    g_rocketCls=cf(img,"SFS.World","FULMMHJZAEKABZAY");
+    g_rocketCls=cf(img,"SFS.World","AXZQENKPBFGBELKJ");
     if(!g_rocketCls){ log_app("v29: no Rocket\n"); return NULL; }
     void* objCls=cf(coreImg,"UnityEngine","Object");
     objCls_ = objCls;
@@ -4080,10 +4082,11 @@ static void* worker(void* arg){
     void* fLoc=cgfn(g_rocketCls,"location");
     if(fName) g_offName=fgo(fName);
     if(fLoc)  g_offLoc=fgo(fLoc);
+    if(g_offLoc < 0) g_offLoc = 0x38;   /* v158: 897 的 location 在基类 MMAZYSGFVKPFLJQT，偏移固定 0x38 */
     g_mGetRot=gm(g_rocketCls,"GetRotation",0);
 
     void* locCls = fLoc ? tgoc(fgt(fLoc)) : NULL;
-    if(!locCls) locCls=cf(img,"SFS.World","FNVQPOCIQHTEDVSZ");
+    if(!locCls) locCls=cf(img,"SFS.World","RMJAWJBMHKPEUJUZ");
     if(locCls){ g_mGetValue = gm(locCls,"get_Value",0); g_mSetValue = gm(locCls,"set_Value",1); }
     { snprintf(b,sizeof(b),"v88: locCls=%p get_Value=%p set_Value=%p locOff=%d\n", locCls, g_mGetValue, g_mSetValue, g_offLoc); log_app(b); }
 
@@ -4114,9 +4117,9 @@ static void* worker(void* arg){
         select_instantiate(objCls, trCls);
         /* ---- v30: resolve the game's own panel factory (the SFS.UI.ModGUI window class) ---- */
         {
-            void* pcls = cf(img, "", "NOJZIZCFSEXSUEEX");
-            if(!pcls) pcls = cf(img, "SFS.UI", "NOJZIZCFSEXSUEEX");
-            if(!pcls) pcls = cf(img, "SFS.UI.ModGUI", "NOJZIZCFSEXSUEEX");
+            void* pcls = cf(img, "", "CLCPKKVBMCAKFMPN");
+            if(!pcls) pcls = cf(img, "SFS.UI", "CLCPKKVBMCAKFMPN");
+            if(!pcls) pcls = cf(img, "SFS.UI.ModGUI", "CLCPKKVBMCAKFMPN");
             size_t (*icnt)(void*) = (size_t(*)(void*))dlsym(h,"il2cpp_image_get_class_count");
             void* (*iget)(void*,int) = (void*(*)(void*,int))dlsym(h,"il2cpp_image_get_class");
             if(!pcls && icnt && iget){
@@ -4131,7 +4134,7 @@ static void* worker(void* arg){
             if(pcls){
                 g_typePanel = tgo(cgt(pcls));
                 g_mDrawFull = gm(pcls,"DrawFullButton",4);
-                void* f = cgfn(pcls,"CHNLEMLKDNN");
+                void* f = cgfn(pcls,"AFNDLBHPLME");
                 if(f) g_offList = fgo(f);
                 f = cgfn(pcls,"menuHolder");
                 if(f) g_offMenuHolder = fgo(f);
@@ -4204,12 +4207,12 @@ static void* worker(void* arg){
         if(trCls){ g_mGetLocalScale=gm(trCls,"get_localScale",0); g_mSetLocalScale=gm(trCls,"set_localScale",1); }
         if(behCls) g_mSetEnabled=gm(behCls,"set_enabled",1);
         if(trCls)  g_mGetSiblingIndex=gm(trCls,"GetSiblingIndex",0);
-        g_btnCls=cf(img,"SFS.UI","HKAZNXTEGNSSTQLF");
+        g_btnCls=cf(img,"SFS.UI","XXWNLMTGUDEVDYSL");
         if(g_btnCls){ g_typeBtn=tgo(cgt(g_btnCls));
             { void* f=cgfn(g_btnCls,"clickEvent"); if(f) g_offClick=fgo(f); }
             { void* f=cgfn(g_btnCls,"holdEvent");  if(f) g_offHold =fgo(f); }
             g_clickField=cgfn(g_btnCls,"clickEvent"); g_holdField=cgfn(g_btnCls,"holdEvent"); }
-        g_txtCls=cf(img,"SFS.UI","NDJCKINKYJCMZNTI");
+        g_txtCls=cf(img,"SFS.UI","SNLFOEXWEMWBRGVA");
         if(g_txtCls){ g_typeTxt=tgo(cgt(g_txtCls)); g_mSetTxt=gm(g_txtCls,"set_Text",1); g_mGetTxt=gm(g_txtCls,"get_Text",0); }
         if(!g_actionCls) g_actionCls=cf(img,"System","Action");
         if(g_actionCls && g_gm && !g_mActionInvoke) g_mActionInvoke=g_gm(g_actionCls,"Invoke",0);
@@ -4218,9 +4221,9 @@ static void* worker(void* arg){
         g_holdEvtCls =cf(img,"SFS.UI","HoldUnityEvent");
         if(g_clickEvtCls){ g_mClickCtor=gm(g_clickEvtCls,".ctor",0); g_mEvtInvoke=gm(g_clickEvtCls,"Invoke",0); }
         if(g_holdEvtCls)  g_mHoldCtor =gm(g_holdEvtCls ,".ctor",0);
-        g_mmCls=cf(img,"SFS.UI","JNFOGGJGNMZRAZYH");
-        if(!g_mmCls) g_mmCls=cf(img,"SFS","JNFOGGJGNMZRAZYH");
-        if(!g_mmCls) g_mmCls=cf(img,"","JNFOGGJGNMZRAZYH");
+        g_mmCls=cf(img,"SFS.UI","RZMTPLWMBSERSHZB");
+        if(!g_mmCls) g_mmCls=cf(img,"SFS","RZMTPLWMBSERSHZB");
+        if(!g_mmCls) g_mmCls=cf(img,"","RZMTPLWMBSERSHZB");
         if(g_mmCls){ g_mOpenCredits=gm(g_mmCls,"OpenCredits",0); g_mmMainField=cgfn(g_mmCls,"main"); }
         g_staticGet=(void(*)(void*,void*))dlsym(h,"il2cpp_field_static_get_value");
         g_gm=(void*(*)(void*,const char*,int))gm;
@@ -4243,17 +4246,17 @@ static void* worker(void* arg){
           }
           if(g_goCls2){ g_mSetActive2 = g_gm(g_goCls2,"SetActive",1); g_mGoActive = g_gm(g_goCls2,"get_activeInHierarchy",0); }
           snprintf(b,sizeof(b),"v44: trType=%p goCls=%p setActive=%p\n", g_trType2, g_goCls2, (void*)g_mSetActive2); log_app(b); }
-        g_tiCls  = cf(img,"SFS.UI","VCJMEXUSBHCVBJHA");
-        g_elemCls= cf(img,"SFS.UI","XPYDSZFDOLBQODKZ");
+        g_tiCls  = cf(img,"SFS.UI","XFNJYWCJDXGPZOLT");
+        g_elemCls= cf(img,"SFS.UI","XCJFMCYZOWIYCSYF");
         g_arrayNew=(void*(*)(void*, uintptr_t))dlsym(h,"il2cpp_array_new");
         if(g_tiCls){ g_mTiOpen=gm(g_tiCls,"Open",5); g_mElement2=gm(g_tiCls,"Element",2); }
         if(g_tmpCls){ g_mSetContentType=gm(g_tmpCls,"set_contentType",1); g_mActivateInput=gm(g_tmpCls,"ActivateInputField",0); }
-        g_boxCls = cf(img,"SFS.UI","TUXXAURTZSIFPXTZ");
+        g_boxCls = cf(img,"SFS.UI","BEDZRJNYAMZNCWLR");
         if(g_boxCls) g_mBoxOpen = gm(g_boxCls,"Open",0);
         g_evtSysCls = cf(coreImg,"UnityEngine.EventSystems","EventSystem");
         if(g_evtSysCls){ g_mSetSel = gm(g_evtSysCls,"SetSelectedGameObject",1);
                          g_mCurEvtSys = gm(g_evtSysCls,"get_current",0); }
-        g_rockCls = cf(img,"SFS.World","FULMMHJZAEKABZAY");
+        g_rockCls = cf(img,"SFS.World","AXZQENKPBFGBELKJ");
         if(g_rockCls){ g_rockType=tgo(cgt(g_rockCls)); }
         /* ---- v73: RocketSave (ctor(Rocket) RVA 0x1852640) 取完整结构 ---- */
         g_rsCls = cf(img,"SFS.World","RocketSave");
@@ -4263,8 +4266,8 @@ static void* worker(void* arg){
             snprintf(b,sizeof(b),"v73: RocketSave cls=%p ctor=%p\n", g_rsCls, g_mRsCtor); log_app(b);
         } else log_app("v73: RocketSave class NOT found\n");
         /* ---- v74: 远端火箭生成（LoadRocket + RocketSave 配套类） ---- */
-        g_spawnerCls = cf(img,"SFS.World","WQPAXLGGCOAUZEOA");
-        if(!g_spawnerCls) g_spawnerCls = cf(img,"","WQPAXLGGCOAUZEOA");
+        g_spawnerCls = cf(img,"SFS.World","VGMIZZYPDOAGCGOS");
+        if(!g_spawnerCls) g_spawnerCls = cf(img,"","VGMIZZYPDOAGCGOS");
         if(g_spawnerCls){
             g_mLoadRocket = gm(g_spawnerCls,"LoadRocket",2);
             snprintf(b,sizeof(b),"v74: spawner cls=%p LoadRocket=%p\n", g_spawnerCls, g_mLoadRocket); log_app(b);
@@ -4328,24 +4331,24 @@ static void* worker(void* arg){
           if(tCls){ g_mTimeScaleGet = gm(tCls,"get_timeScale",0); g_mTimeScaleSet = gm(tCls,"set_timeScale",1);
                     snprintf(b,sizeof(b),"v67: Time get=%.p set=%p\n", (void*)g_mTimeScaleGet, (void*)g_mTimeScaleSet); log_app(b); } }
         /* ---- v64: the game's own scene loader (world entry point) ---- */
-        g_sceneLoaderCls = cf(img,"SFS","USPVHOMQUKUGZPLU");
-        if(!g_sceneLoaderCls) g_sceneLoaderCls = cf(img,"","USPVHOMQUKUGZPLU");
+        g_sceneLoaderCls = cf(img,"SFS","QFGSESNBNSUTRFTS");
+        if(!g_sceneLoaderCls) g_sceneLoaderCls = cf(img,"","QFGSESNBNSUTRFTS");
         if(g_sceneLoaderCls){
             g_typeSceneLoader = tgo(cgt(g_sceneLoaderCls));
     /* v100: WorldView / Base / planetLoader / SpaceCenterData 解析 */
-    g_worldViewCls = cf(img,"SFS.World","ZIMVTWPJZBTPPXSR");
+    g_worldViewCls = cf(img,"SFS.World","XAXCCQNDFGKVWDLV");
     if(g_worldViewCls){
         void* fs = cgfn(g_worldViewCls,"main");
         if(fs){ g_worldViewMainField = fs; }
         g_mSetViewLocation = gm(g_worldViewCls,"SetViewLocation",1);
     }
-    g_baseCls = cf(img,"SFS","RQOFTSKFXWRDBQCA");
+    g_baseCls = cf(img,"SFS","JFNHOQBWNYGSGXGG");
     if(g_baseCls){
         g_typeBase = cgt ? tgo(cgt(g_baseCls)) : NULL;
         void* fp = cgfn(g_baseCls,"planetLoader");
         if(fp) g_offPlanetLoader = (int)fgo(fp);
     }
-    g_plCls = cf(img,"SFS.WorldBase","YXHFAUIATGCKNHYQ");
+    g_plCls = cf(img,"SFS.WorldBase","QCHSPBTJBULPIBRF");
     if(g_plCls){
         void* fs2 = cgfn(g_plCls,"spaceCenter");
         if(fs2) g_offSpaceCenter = (int)fgo(fs2);
@@ -4361,16 +4364,16 @@ static void* worker(void* arg){
             g_mLoadWorldScene = gm(g_sceneLoaderCls,"LoadWorldScene",1);
             if(!g_mLoadWorldScene) g_mLoadWorldScene = gm(g_sceneLoaderCls,"LoadWorldScene",0);
             /* v173: 航天大楼 —— SceneLoader.LoadHubScene(bool,bool,bool,bool) RVA 0x16EE1CC  */
-            g_mLoadHubScene = gm(g_sceneLoaderCls,"LoadHubScene",4);
+            g_mLoadHubScene = gm(g_sceneLoaderCls,"LoadHubScene",0);   /* v158: 897 只有 LoadHubScene()/0 */
             snprintf(b,sizeof(b),"v173: LoadHubScene=%p LoadWorldScene=%p\n", g_mLoadHubScene, g_mLoadWorldScene); log_app(b);
             snprintf(b,sizeof(b),"v64: sceneLoader cls=%p type=%p LoadWorldScene=%p\n",
                      g_sceneLoaderCls,g_typeSceneLoader,g_mLoadWorldScene);
             log_app(b);
         } else log_app("v64: scene loader class NOT found\n");
         /* ---- v70: 官方进世界链路 EnterWorld(string, Action) ---- */
-        g_wbCls = cf(img,"SFS.WorldBase","FAELUUBBVIPEYYXS");
-        if(!g_wbCls) g_wbCls = cf(img,"SFS","FAELUUBBVIPEYYXS");
-        if(!g_wbCls) g_wbCls = cf(img,"","FAELUUBBVIPEYYXS");
+        g_wbCls = cf(img,"SFS.WorldBase","JRMHWFEIUSAIOARX");
+        if(!g_wbCls) g_wbCls = cf(img,"SFS","JRMHWFEIUSAIOARX");
+        if(!g_wbCls) g_wbCls = cf(img,"","JRMHWFEIUSAIOARX");
         if(g_wbCls){
             g_mEnterWorld = gm(g_wbCls,"EnterWorld",2);
             if(!g_mEnterWorld) g_mEnterWorld = gm(g_wbCls,"EnterWorld",1);
@@ -4378,17 +4381,18 @@ static void* worker(void* arg){
         } else log_app("v70: world base class NOT found\n");
         { void* tc2=cf(coreImg,"UnityEngine","Transform"); if(tc2) g_mGetPosition=gm(tc2,"get_position",0); }
         snprintf(b,sizeof(b),"v46: rocket cls=%p type=%p getpos=%p\n", g_rockCls,g_rockType,(void*)g_mGetPosition); log_app(b);
-        g_toastCls = cf(img,"SFS.UI","EJIHSVFRLSOQRBJE");
+        g_toastCls = cf(img,"SFS.UI","YXGFAKNVGIDWZZCW");
         if(g_toastCls){ g_toastField=cgfn(g_toastCls,"main"); g_mToast=gm(g_toastCls,"Log",1); }
         snprintf(b,sizeof(b),"v45: toast cls=%p field=%p log=%p\n", g_toastCls,g_toastField,g_mToast); log_app(b);
-        { void* cr=cf(img,"SFS.UI","DEOTNULUBFZWSSUA"); if(cr) g_tiField=cgfn(cr,"textInput"); }
+        { void* cr=cf(img,"SFS.UI","TFQAGVWYKGLCWQSF"); if(cr) g_tiField=cgfn(cr,"textInput"); }
         snprintf(b,sizeof(b),"v44: TI cls=%p open=%p elem=%p field=%p anew=%p\n", g_tiCls,g_mTiOpen,g_mElement2,g_tiField,(void*)g_arrayNew); log_app(b);
-        g_popCls = cf(img,"","PKVTCUBZSQHIVNVO");
-        if(!g_popCls) g_popCls = cf(img,"SFS.UI","PKVTCUBZSQHIVNVO");
+        g_popCls = cf(img,"","EIOWRSEJQPDKJMVZ");
+        if(!g_popCls) g_popCls = cf(img,"SFS.UI","EIOWRSEJQPDKJMVZ");
+        if(!g_popCls) g_popCls = cf(img,"SFS.UI","OJQDUFMMMTTUSRLG");   /* v158: 兜底候选（旧 ReportMenu） */
         if(g_popCls){ g_popType = tgo(cgt(g_popCls)); g_mPopOpen = gm(g_popCls,"OnOpen",0);
             snprintf(b,sizeof(b),"v44: popupCls=%p type=%p OnOpen=%p\n", g_popCls, g_popType, g_mPopOpen); log_app(b); }
-        g_nojCls2 = cf(img,"","NOJZIZCFSEXSUEEX");
-        if(!g_nojCls2) g_nojCls2 = cf(img,"SFS.UI","NOJZIZCFSEXSUEEX");
+        g_nojCls2 = cf(img,"","CLCPKKVBMCAKFMPN");
+        if(!g_nojCls2) g_nojCls2 = cf(img,"SFS.UI","CLCPKKVBMCAKFMPN");
         if(g_nojCls2){ g_nojType2 = tgo(cgt(g_nojCls2));
             g_mOpenNoj    = g_gm(g_nojCls2,"Open",5);
             g_mDrawTitle2 = g_gm(g_nojCls2,"DrawTitle",1);
@@ -4400,14 +4404,15 @@ static void* worker(void* arg){
             snprintf(b,sizeof(b),"v43: noj cls=%p type=%p open=%p title=%p text=%p btn=%p\n", g_nojCls2,g_nojType2,g_mOpenNoj,g_mDrawTitle2,g_mDrawText3,g_mDrawFullBtn);
             log_app(b);
         } else log_app("v43: noj class NOT found\n");
-        g_modsCls=cf(img,"ModLoader.UI","NANBAJRHGSVEQBTQ");
-        if(!g_modsCls) g_modsCls=cf(img,"ModLoader","NANBAJRHGSVEQBTQ");
+        g_modsCls=cf(img,"ModLoader.UI","XXDQMDDXEKRGSNMN");
+        if(!g_modsCls) g_modsCls=cf(img,"ModLoader","XXDQMDDXEKRGSNMN");
         if(g_modsCls){
             void* (*par)(void*) = (void*(*)(void*))dlsym(h,"il2cpp_class_get_parent");
             void* bc=par?par(g_modsCls):NULL;
             g_modsMainField=cgfn(g_modsCls,"main");
             if(bc) g_modsOpen=gm(bc,"Open",0);
             if(!g_modsOpen) g_modsOpen=gm(g_modsCls,"Open",0);
+            if(!g_modsOpen && bc && par){ void* gp=par(bc); if(gp) g_modsOpen=gm(gp,"Open",0); }   /* v158: Open/0 在祖父类 SFS.Input.JJTTDHYICIPADYOW */
         }
         { char mb[160]; snprintf(mb,sizeof(mb),"v40: mods cls=%p open=%p mainF=%p\n",g_modsCls,g_modsOpen,g_modsMainField); log_app(mb); }
         g_mObjGetClass=(void*(*)(void*))dlsym(h,"il2cpp_object_get_class");
@@ -4415,7 +4420,7 @@ static void* worker(void* arg){
         g_mClassParent=(void*(*)(void*))dlsym(h,"il2cpp_class_get_parent");
         snprintf(b,sizeof(b),"v33: mainmenu cls=%p openCredits=%p mainField=%p\n",g_mmCls,g_mOpenCredits,g_mmMainField);
         log_app(b);
-        g_trCls=cf(img,"SFS.Translations","WRNLOFEPQTZANWYN");
+        g_trCls=cf(img,"SFS.Translations","DNXRIGFHFVEUMRWY");
         if(g_trCls) g_trType=tgo(cgt(g_trCls));
         if(uiI){ void* lb=cf(uiI,"UnityEngine.UI","LayoutRebuilder");
                  g_mForceRebuild=lb?gm(lb,"ForceRebuildLayoutImmediate",1):NULL; }
@@ -4432,19 +4437,19 @@ static void* worker(void* arg){
     }
     {
         void* smCls=NULL; const char* ns2[]={"SFS.Input","SFS.UI","SFS",""};
-        for(int k=0;k<3&&!smCls;k++) smCls=cf(img,ns2[k],"VNDAREHWRIQNAAKC");
+        for(int k=0;k<3&&!smCls;k++) smCls=cf(img,ns2[k],"ULDQJUJABBTLDBBT");
         if(!smCls){ log_app("v32: no screen manager\n"); return NULL; }
         void* upd=gm(smCls,"Update",0);
         if(!upd){ log_app("v32: no screen Update\n"); return NULL; }
         void** mi=(void**)upd; uintptr_t page=4096;
         mp((void*)((uintptr_t)mi & ~(page-1)), page*2, PROT_READ|PROT_WRITE|PROT_EXEC);
-        g_orig_update=mi[0]; mi[0]=(void*)hook_update;
+        g_orig_update=mi[0]; (void)mi;   /* v159 诊断：暂时不 hook screen manager Update */
         log_app("v32: armed (screen stack hook)\n");
-        { void* wt = cf(img,"SFS.World","VCQSQMYGGZECNBPE");
+        { void* wt = cf(img,"SFS.World","YGYPZYKWDOEYEBFA");
           if(wt){ void* upd2 = gm(wt,"Update",0);
             if(upd2){ void** mi2=(void**)upd2;
               mp((void*)((uintptr_t)mi2 & ~(page-1)), page*2, PROT_READ|PROT_WRITE|PROT_EXEC);
-              g_orig_wt_update = mi2[0]; mi2[0]=(void*)hook_worldtime;
+              g_orig_wt_update = mi2[0]; (void)mi2;   /* v159 诊断：暂时不 hook WorldTime.Update */
               snprintf(b,sizeof(b),"v46: WorldTime hook armed (was %p)\n", (void*)g_orig_wt_update); log_app(b);
             } else log_app("v46: WorldTime.Update not found\n");
           } else log_app("v46: WorldTime class not found\n"); }
