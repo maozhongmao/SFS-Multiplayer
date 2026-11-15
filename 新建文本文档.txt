@@ -1,0 +1,34 @@
+# 更新日志
+
+## V2.0.0（手机端首发）
+
+**新功能**
+
+- **手机端（Android）联机**：官方 SFS 1.6.00.22 与 PC 玩家进入同一个世界，互相能看到对方的火箭、朝向与运动。手机端与服务端之间使用 KCP over UDP，协议与 PC 端同源。
+- **补丁安装器（共存模式）**：安装器在手机上就地给**你自己已安装的官方游戏**打补丁（注入层 + 跳板 dex + 重签名），并把包名改成 `com.sfsmp.sfs` 与官方版共存。不覆盖官方、不需要 root、不需要电脑，也**不重新分发游戏本体**。
+- **服务端平台识别**：`Hello` 握手新增一个可选字节 `platform`（缺失/0 = PC，1 = Android），老客户端不受影响。`players` 指令据此标注 `[pc]` / `[android]` 并统计两端人数；同时**对手机端直接丢弃 P2P 报价**，避免 PC 发起方一直等。
+- **IPv6 支持**：手机端连接地址支持 `[2001:db8::1]:9806`、纯 IPv6（默认端口）、`host:port`、纯 IPv4；逐个候选地址尝试，任一成功即连上。
+
+**同步与稳定性**
+
+- **位姿频率对齐 PC 端**：上行主状态包由固定 50 ms 间隔发送；下行按 120 ms 延迟做插值采样（`mp_snap_t` 环形缓冲 + 角度最短弧插值），并对超过 2 m 的偏差做硬对齐、其余情况走速度追逐，避免与本地物理打架。
+- **服务端**：`players` 指令输出附带 RTT 与控制中的火箭；手机端连接不再触发 P2P 协商循环。
+
+---
+
+### 下载哪个版本
+
+| 顺序 | 文件 | 说明 |
+|---|---|---|
+| 1 | SFS-Multiplayer-2.0.2-arm64-v8a.apk | 手机端补丁安装器 · Android 10+ / arm64-v8a。（速度最快）|
+| 1 | SFS-Multiplayer-2.0.2-armeabi-v7a.apk | 手机端补丁安装器 · Android 10+ / armeabi-v7a。（兼容性最好）|
+| 2 | SFS-Multiplayer-1.5-V2.0.dll | 客户端模组 · SFS 1.5（Windows 7 等只能跑 1.5 的系统）|
+| 3 | SFS-Multiplayer-1.6-V2.0.dll | 客户端模组 · SFS 1.6（当前游戏版本）|
+| 4 | SFS-Multiplayer-Server-linux-arm64 | 服务端 · Linux ARM64（树莓派 4+ / 现代 ARM 服务器）|
+| 5 | SFS-Multiplayer-Server-linux-armv7 | 服务端 · Linux ARMv7 32 位（开发板等）|
+| 6 | SFS-Multiplayer-Server-linux-x64 | 服务端 · Linux x86-64（云服务器 / VPS）|
+| 7 | SFS-Multiplayer-Server-windows-x64.exe | 服务端 · Windows x86-64（普通电脑）|
+| 8 | SFS-Multiplayer-Server-windows-arm64.exe | 服务端 · Windows ARM64（这个没什么好说的）|
+
+> 客户端、手机端与服务端必须配套使用。
+> 手机端补丁只对 **SFS 1.6.00.22 (936)** 生效，官方更新后需等适配。

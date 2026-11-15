@@ -106,6 +106,77 @@
 ### 交互 API
 - `sfs.askUser(question)`：向服务端控制台提问并返回一行输入。
 
+写回时只有上表字段有效；`rocketId` 必须已存在，否则返回 `-3`。
+
+## 3. 事件契约（批量，每秒一次）
+
+字节码求值结果必须是函数 `onEvent(event)`，宿主在每次投递时调用它。
+**同一个事件对象里已经批量装好整个世界**，插件不要按帧轮询。
+
+```json
+{ "kind": "worldSnapshot", "tick": 1024, "worldTime": 33.5,
+  "droppedRockets": 0,
+  "rockets": [ /* RocketView[] */ ],
+  "players": [ { "playerId": 4, "controlledRocket": 123, "name": "alice" } ] }
+```
+
+| `kind` | 触发 | 载荷 |
+|---|---|---|
+| `worldSnapshot` | 每秒 1 次 | `tick`/`worldTime`/`droppedRockets`/`rockets`/`players` |
+| `playerJoined` | 玩家加入 | `player` 对象 |
+| `playerLeft` | 玩家离开 | `player` 对象 |
+| `chatMessage` | 聊天 | `playerId` + `text`（UTF-8，≤255 字节） |
+
+单轮投递的指令预算耗尽或抛出未捕获异常时，宿主把插件置为 `faulted` 并停止投递；
+`faulted` 是终态，需控制台重新装载。
+
+## 4. 状态码（`HostStatus`）
+
+| 值 | 名称 | 含义 |
+|---|---|---|
+| `0` | `ok` | 成功 |
+| `-1` | `no-capability` | 描述符里没有声明该能力位 |
+| `-2` | `bad-argument` | 参数越界/非法数值/超长 |
+| `-3` | `not-found` | 火箭或玩家不存在 |
+| `-4` | `budget-exhausted` | 本轮 API 调用预算（默认 1024）或写次数（64）用尽 |
+| `-5` | `unavailable` | 服务端未安装 `HostServices` 适配层 |
+| `-6` | `bad-state` | 插件不在 `running` 状态 / ctx 无效 |
+
+## 5. 不在白名单里（明确禁止）
+
+文件读写、网络/套接字、进程/线程、动态源码求值（`eval` 由字节码-only 策略天然没有入口）、
+模块加载、系统时间以外的高精度计时、任何未在 §2 列出的宿主调用。
+
+
+---
+
+## 6. 沙箱已移除（2026-11-08）
+
+- 能力位（capabilities）不再检查；插件可调用所有已注册 API。
+- 内存、栈、指令预算、每轮 API 调用次数不再限制。
+- 新增文件 API：`sfs.readFile(path)`、`sfs.writeFile(path, text)`、`sfs.listDir(path)`。
+- 仍保留参数边界（玩家 id、文本长度/控制字符、坐标有限数、字节码格式），这属于防误用，不是安全隔离。
+- **只运行可信插件；风险由服务器管理员承担。**
+
+
+## 7. 2026-11-08 API 扩展
+
+### 元数据与生命周期
+- `sfs.plugin`：`{ id, name, author, version, minServerVersion }`
+- 全局可选函数：`onLoad()`、`onUnload()`、`onTick()`；`onTick` 与事件同节拍，每秒一次。
+
+### 文件 API
+- `sfs.readFile(path)`
+- `sfs.writeFile(path, text)`
+- `sfs.listDir(path)`
+- `sfs.deleteFile(path)`
+- `sfs.mkdir(path)`
+- `sfs.exists(path)`
+- `sfs.renameFile(from, to)`
+
+### 交互 API
+- `sfs.askUser(question)`：向服务端控制台提问并返回一行输入。
+
 ### 仍缺少（对比同行）
 - 原始包级钩子：`onPacketReceived/onPacketSent/onUnhandledPacket`
 - 面板交互回传：`onPanelReply`
